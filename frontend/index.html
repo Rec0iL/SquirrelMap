@@ -6,7 +6,7 @@
   <title>SquirrelMap — 3D Idea Mindmap & Sourcing Graph</title>
   <meta name="description" content="An interactive 3D idea mindmap and maker project graph with local Markdown notes, cross-project BOM parts bulk-sourcing, and autonomous AI agents.">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="css/style.css?v=39">
+  <link rel="stylesheet" href="css/style.css?v=40">
 </head>
 <body class="theme-glass-dark">
 
@@ -532,13 +532,30 @@
         <button id="btnExpandMcpChat" class="panel-icon-btn" title="Toggle Expanded View">
           <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
         </button>
-        <button id="btnClearMcpChat" class="panel-icon-btn" title="Clear Conversation">
+        <button id="btnChatHistory" class="panel-icon-btn" title="Chat History">
+          <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        </button>
+        <button id="btnClearMcpChat" class="panel-icon-btn" title="New Chat (the current one stays in History)">
           <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
         </button>
         <button id="btnCloseMcpChat" class="panel-close-btn" title="Close Chat">
           <svg style="width: 16px; height: 16px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
+    </div>
+
+    <!-- Chat History Panel (Collapsible Overlay) -->
+    <div id="chatHistoryPanel" class="chat-settings-panel" style="display: none;">
+      <div class="chat-settings-header">
+        <strong>🕘 Chat History</strong>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button id="btnNewChat" class="btn-action" style="padding: 3px 10px; font-size: 0.75rem;">＋ New chat</button>
+          <button id="btnCloseChatHistory" class="panel-close-btn" style="width: 26px; height: 26px;">
+            <svg style="width: 14px; height: 14px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="chatHistoryList" class="chat-settings-body chat-history-list"></div>
     </div>
 
     <!-- Chat Agent Settings Panel (Collapsible Overlay) -->
@@ -730,7 +747,7 @@
   <script src="vendor/marked.min.js"></script>
   <script src="js/graph3d.js?v=36"></script>
   <script src="js/ai_modal.js?v=36"></script>
-  <script src="js/chat.js?v=36"></script>
+  <script src="js/chat.js?v=37"></script>
   <script src="js/app.js?v=36"></script>
 </body>
 </html>

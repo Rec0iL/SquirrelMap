@@ -1,6 +1,6 @@
 {
   "name": "squirrelmap",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "3D Idea Mindmap & Sourcing Graph",
   "main": "electron/main.js",
   "author": "Rec0iL",

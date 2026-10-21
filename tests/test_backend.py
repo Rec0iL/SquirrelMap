@@ -83,5 +83,17 @@ An overview.
         self.assertEqual(extracted["status"], "concept")
         self.assertEqual(len(extracted["bom"]), 1)
 
+    def test_chat_history_crud(self):
+        cid = "test-chat-crud"
+        database.save_chat_session(cid, "Hello", "claude", "sonnet",
+                                   [{"role": "user", "kind": "html", "html": "hi"}], [{"role": "user", "content": "hi"}])
+        self.assertTrue(any(c["id"] == cid and c["message_count"] == 1 for c in database.list_chat_sessions()))
+        database.save_chat_session(cid, "Hello 2", "claude", "sonnet", [], [])
+        sess = database.get_chat_session(cid)
+        self.assertEqual(sess["title"], "Hello 2")
+        self.assertIsNotNone(database.delete_chat_session(cid))
+        self.assertIsNone(database.get_chat_session(cid))
+        self.assertIsNone(database.delete_chat_session(cid))
+
 if __name__ == "__main__":
     unittest.main()

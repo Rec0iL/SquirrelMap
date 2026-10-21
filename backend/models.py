@@ -130,3 +130,11 @@ class McpChatRequest(BaseModel):
     api_key: Optional[str] = None
     is_voice: Optional[bool] = False
     voice_metadata: Optional[Dict[str, Any]] = None
+
+
+class ChatSessionSave(BaseModel):
+    title: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    messages: List[Dict[str, Any]] = []
+    history: List[Dict[str, Any]] = []

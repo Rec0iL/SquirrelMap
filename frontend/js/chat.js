@@ -87,6 +87,16 @@ class McpChatManager {
     this.claudeStatusBadge = document.getElementById('claudeCliStatusBadge');
 
     this.history = [];
+    // Persistent chat history: every conversation is saved in the backend and can be reopened or deleted
+    this.chatId = null;
+    this.chatLog = [];        // display entries used to re-render a saved chat
+    this.restoringChat = false;
+    this.saveTimer = null;
+    this.btnHistory = document.getElementById('btnChatHistory');
+    this.historyPanel = document.getElementById('chatHistoryPanel');
+    this.historyList = document.getElementById('chatHistoryList');
+    this.btnCloseHistory = document.getElementById('btnCloseChatHistory');
+    this.btnNewChat = document.getElementById('btnNewChat');
     this.isExpanded = false;
     this.isBusy = false;
 
@@ -109,6 +119,9 @@ class McpChatManager {
     if (this.btnOpen) this.btnOpen.addEventListener('click', () => this.open());
     if (this.btnClose) this.btnClose.addEventListener('click', () => this.close());
     if (this.btnClear) this.btnClear.addEventListener('click', () => this.clearChat());
+    if (this.btnHistory) this.btnHistory.addEventListener('click', () => this.toggleHistory());
+    if (this.btnCloseHistory) this.btnCloseHistory.addEventListener('click', () => this.closeHistory());
+    if (this.btnNewChat) this.btnNewChat.addEventListener('click', () => { this.closeHistory(); this.clearChat(); });
     if (this.btnExpand) this.btnExpand.addEventListener('click', () => this.toggleExpand());
     if (this.btnSend) this.btnSend.addEventListener('click', () => this.sendMessage());
 
@@ -335,6 +348,7 @@ class McpChatManager {
     if (isVisible) {
       this.closeSettings();
     } else {
+      this.closeHistory();
       this.settingsPanel.style.display = 'flex';
       const p = this.agentConfig.provider || 'agy';
       if (this.agentProviderSelect) this.agentProviderSelect.value = p;
@@ -724,6 +738,7 @@ class McpChatManager {
     this.drawer.classList.remove('open');
     this.hideMentionPopup();
     this.closeSettings();
+    this.closeHistory();
   }
 
   toggleExpand() {
@@ -867,6 +882,7 @@ class McpChatManager {
     msgDiv.appendChild(bubble);
     this.messagesContainer.appendChild(msgDiv);
     this.scrollToBottom();
+    if (role === 'assistant' && isRaw) this.recordEntry({ role: 'assistant', kind: 'md', text: content });
     return msgDiv;
   }
 
@@ -895,7 +911,152 @@ class McpChatManager {
     }
   }
 
+  // ---- Chat history persistence ----
+
+  recordEntry(entry) {
+    if (this.restoringChat) return;
+    this.chatLog.push(entry);
+    this.scheduleSaveChat();
+  }
+
+  scheduleSaveChat() {
+    if (this.restoringChat || this.chatLog.length === 0) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.saveChat(), 300);
+  }
+
+  chatTitle() {
+    const first = this.chatLog.find(e => e.role === 'user');
+    let t = '';
+    if (first) {
+      if (first.kind === 'voice') {
+        t = '🎙️ ' + (first.transcript || 'Voice note');
+      } else {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = first.html || '';
+        t = tmp.textContent || '';
+      }
+    }
+    t = t.replace(/\s+/g, ' ').trim();
+    return (t.length > 70 ? t.slice(0, 70) + '…' : t) || 'Untitled chat';
+  }
+
+  async saveChat() {
+    if (this.chatLog.length === 0) return;
+    if (!this.chatId) {
+      this.chatId = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+    try {
+      await fetch('/api/chats/' + this.chatId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: this.chatTitle(),
+          provider: this.agentConfig.provider || 'agy',
+          model: this.agentConfig.model || null,
+          messages: this.chatLog,
+          history: this.history
+        })
+      });
+    } catch (e) {
+      console.warn('Could not save chat history', e);
+    }
+  }
+
+  toggleHistory() {
+    if (!this.historyPanel) return;
+    if (this.historyPanel.style.display === 'none') {
+      this.closeSettings();
+      this.historyPanel.style.display = 'flex';
+      this.refreshHistoryList();
+    } else {
+      this.closeHistory();
+    }
+  }
+
+  closeHistory() {
+    if (this.historyPanel) this.historyPanel.style.display = 'none';
+  }
+
+  async refreshHistoryList() {
+    if (!this.historyList) return;
+    this.historyList.innerHTML = '<div class="chat-history-empty">Loading…</div>';
+    const resp = await fetch('/api/chats').catch(() => null);
+    const chats = resp && resp.ok ? await safeJson(resp) : null;
+    if (!Array.isArray(chats)) {
+      this.historyList.innerHTML = '<div class="chat-history-empty">Could not load chat history.</div>';
+      return;
+    }
+    if (chats.length === 0) {
+      this.historyList.innerHTML = '<div class="chat-history-empty">No saved chats yet. Your conversations will appear here.</div>';
+      return;
+    }
+    this.historyList.innerHTML = '';
+    chats.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'chat-history-item' + (c.id === this.chatId ? ' active' : '');
+      const when = c.updated_at ? new Date(c.updated_at).toLocaleString() : '';
+      row.innerHTML = `
+        <div class="chat-history-main" title="Open this chat">
+          <div class="chat-history-title">${this.escapeHtml(c.title)}</div>
+          <div class="chat-history-meta">${this.escapeHtml(when)} · ${c.message_count} messages${c.provider ? ' · ' + this.escapeHtml(c.provider) : ''}</div>
+        </div>
+        <button class="panel-icon-btn chat-history-delete" title="Delete this chat">🗑</button>
+      `;
+      row.querySelector('.chat-history-main').addEventListener('click', () => this.loadChat(c.id));
+      row.querySelector('.chat-history-delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete this chat?\n\n"${c.title}"\n\nThis also removes its voice recordings.`)) return;
+        const r = await fetch('/api/chats/' + c.id, { method: 'DELETE' }).catch(() => null);
+        if (r && r.ok) {
+          if (c.id === this.chatId) { this.chatLog = []; this.clearChat(); } // nothing left to re-save
+          this.refreshHistoryList();
+        } else {
+          alert('Could not delete the chat.');
+        }
+      });
+      this.historyList.appendChild(row);
+    });
+  }
+
+  async loadChat(id) {
+    if (this.isBusy) return;
+    const resp = await fetch('/api/chats/' + id).catch(() => null);
+    const sess = resp && resp.ok ? await safeJson(resp) : null;
+    if (!sess || !Array.isArray(sess.messages)) {
+      alert('Could not open this chat.');
+      return;
+    }
+    clearTimeout(this.saveTimer);
+    this.chatId = sess.id;
+    this.history = Array.isArray(sess.history) ? sess.history : [];
+    this.chatLog = sess.messages;
+    this.restoringChat = true;
+    try {
+      if (this.messagesContainer) this.messagesContainer.innerHTML = '';
+      if (this.input) this.input.innerHTML = '';
+      this.chatLog.forEach(e => {
+        if (e.role === 'user' && e.kind === 'voice') {
+          this.appendVoiceUserMessage({ audioUrl: e.audioUrl, transcript: e.transcript || '', durationSeconds: e.durationSeconds || 0 });
+        } else if (e.role === 'user') {
+          this.appendUserMessage(e.html || '');
+        } else {
+          this.appendMessage('assistant', e.text || '', true);
+        }
+      });
+    } finally {
+      this.restoringChat = false;
+    }
+    this.closeHistory();
+    this.scrollToBottom();
+  }
+
   clearChat() {
+    // Starts a fresh conversation; the previous one stays available in the history.
+    clearTimeout(this.saveTimer);
+    if (this.chatLog.length > 0 && this.chatId) this.saveChat();
+    this.chatId = null;
+    this.chatLog = [];
     this.history = [];
     if (this.messagesContainer) this.messagesContainer.innerHTML = "";
     if (this.input) this.input.innerHTML = "";
@@ -903,6 +1064,7 @@ class McpChatManager {
   }
 
   appendUserMessage(bubbleHtml, referencedNodes = []) {
+    this.recordEntry({ role: 'user', kind: 'html', html: bubbleHtml });
     const msgDiv = document.createElement("div");
     msgDiv.className = "chat-message user";
 
@@ -1023,6 +1185,7 @@ class McpChatManager {
   }
 
   appendErrorCard({ provider, model, errorMessage, originalText, referencedNodes, bubbleHtml }) {
+    this.scheduleSaveChat(); // history was rolled back for the failed request
     const msgDiv = document.createElement("div");
     msgDiv.className = "chat-message assistant chat-error-container";
 
@@ -1379,6 +1542,7 @@ class McpChatManager {
   }
 
   appendVoiceUserMessage({ audioUrl, transcript, durationSeconds, referencedNodes = [] }) {
+    this.recordEntry({ role: 'user', kind: 'voice', audioUrl, transcript, durationSeconds });
     const msgDiv = document.createElement("div");
     msgDiv.className = "chat-message user chat-voice-user-message";
 

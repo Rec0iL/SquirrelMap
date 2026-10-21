@@ -65,6 +65,19 @@ def init_db():
     )
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        messages_json TEXT NOT NULL,
+        history_json TEXT NOT NULL,
+        created_at TEXT,
+        updated_at TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -142,7 +155,7 @@ def parse_markdown_file(file_path: str) -> Optional[Dict[str, Any]]:
                         qty = 1
                         notes = cols[1] if len(cols) > 1 else ""
                         if len(cols) > 1:
-                            qm = re.match(r"^(\d+)\b", cols[1])
+                            qm = re.match(r"^(\d+)\s*[x×]?$", cols[1])
                             if qm:
                                 qty = max(1, int(qm.group(1)))
                                 notes = cols[2] if len(cols) > 2 else ""
@@ -246,7 +259,7 @@ def parse_markdown_string(raw: str, default_id: Optional[str] = None) -> Optiona
                         qty = 1
                         notes = cols[1] if len(cols) > 1 else ""
                         if len(cols) > 1:
-                            qm = re.match(r"^(\d+)\b", cols[1])
+                            qm = re.match(r"^(\d+)\s*[x×]?$", cols[1])
                             if qm:
                                 qty = max(1, int(qm.group(1)))
                                 notes = cols[2] if len(cols) > 2 else ""
@@ -983,3 +996,56 @@ Hands get dirty when soldering or greasing bearings. A local, privacy-first voic
             f.write(content)
 
     print(f"Seeded {len(seeds)} default creative ideas in {IDEAS_DIR}")
+
+
+# ---------------------------------------------------------------------------
+# AI chat history
+# ---------------------------------------------------------------------------
+
+def list_chat_sessions() -> List[Dict[str, Any]]:
+    conn = get_connection()
+    rows = conn.execute("SELECT id, title, provider, model, messages_json, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC").fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        try:
+            count = len(json.loads(r["messages_json"]))
+        except Exception:
+            count = 0
+        out.append({"id": r["id"], "title": r["title"], "provider": r["provider"], "model": r["model"],
+                    "message_count": count, "created_at": r["created_at"], "updated_at": r["updated_at"]})
+    return out
+
+def get_chat_session(chat_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    r = conn.execute("SELECT * FROM chat_sessions WHERE id = ?", (chat_id,)).fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {"id": r["id"], "title": r["title"], "provider": r["provider"], "model": r["model"],
+            "messages": json.loads(r["messages_json"]), "history": json.loads(r["history_json"]),
+            "created_at": r["created_at"], "updated_at": r["updated_at"]}
+
+def save_chat_session(chat_id: str, title: str, provider: Optional[str], model: Optional[str],
+                      messages: List[Dict[str, Any]], history: List[Dict[str, Any]]) -> None:
+    now = datetime.now().isoformat()
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO chat_sessions (id, title, provider, model, messages_json, history_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET title=excluded.title, provider=excluded.provider, model=excluded.model,
+               messages_json=excluded.messages_json, history_json=excluded.history_json, updated_at=excluded.updated_at""",
+        (chat_id, title, provider, model, json.dumps(messages, ensure_ascii=False), json.dumps(history, ensure_ascii=False), now, now))
+    conn.commit()
+    conn.close()
+
+def delete_chat_session(chat_id: str) -> Optional[List[Dict[str, Any]]]:
+    """Deletes a chat; returns its messages (so callers can clean up audio) or None if it did not exist."""
+    sess = get_chat_session(chat_id)
+    if not sess:
+        return None
+    conn = get_connection()
+    conn.execute("DELETE FROM chat_sessions WHERE id = ?", (chat_id,))
+    conn.commit()
+    conn.close()
+    return sess["messages"]

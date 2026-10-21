@@ -3209,3 +3209,18 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Chat history panel */
+.chat-history-list { display: flex; flex-direction: column; gap: 6px; }
+.chat-history-empty { color: var(--text-muted); font-size: 0.82rem; padding: 10px 4px; }
+.chat-history-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px; transition: background 0.15s, border-color 0.15s;
+}
+.chat-history-item:hover { background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.35); }
+.chat-history-item.active { border-color: rgba(168, 85, 247, 0.6); }
+.chat-history-main { flex: 1; min-width: 0; cursor: pointer; }
+.chat-history-title { font-size: 0.85rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-history-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
+.chat-history-delete { flex-shrink: 0; }

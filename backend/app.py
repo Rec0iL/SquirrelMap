@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 from backend.models import (
     IdeaNode, IdeaEdge, GraphData, BOMSummary,
     IdeaBrainstormRequest, FuseIdeasRequest, SplitIdeaRequest,
-    McpChatRequest
+    McpChatRequest, ChatSessionSave
 )
 from backend import database
 from backend.graph_engine import engine
@@ -306,6 +306,51 @@ async def _mcp_chat_impl(req: McpChatRequest):
             "categories": engine.categories
         }
     }
+
+import re as _re
+
+_CHAT_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+def _check_chat_id(chat_id: str):
+    if not _CHAT_ID_RE.match(chat_id):
+        raise HTTPException(status_code=400, detail="Invalid chat id")
+
+@app.get("/api/chats")
+async def list_chats_endpoint():
+    return database.list_chat_sessions()
+
+@app.get("/api/chats/{chat_id}")
+async def get_chat_endpoint(chat_id: str):
+    _check_chat_id(chat_id)
+    sess = database.get_chat_session(chat_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return sess
+
+@app.put("/api/chats/{chat_id}")
+async def save_chat_endpoint(chat_id: str, body: ChatSessionSave):
+    _check_chat_id(chat_id)
+    database.save_chat_session(chat_id, body.title[:200] or "Untitled chat", body.provider, body.model, body.messages, body.history)
+    return {"success": True}
+
+@app.delete("/api/chats/{chat_id}")
+async def delete_chat_endpoint(chat_id: str):
+    _check_chat_id(chat_id)
+    messages = database.delete_chat_session(chat_id)
+    if messages is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    # Remove voice recordings that belonged to this chat
+    audio_dir = whisper_service.get_audio_dir()
+    for m in messages:
+        url = m.get("audioUrl") if isinstance(m, dict) else None
+        if url:
+            path = os.path.join(audio_dir, os.path.basename(url))
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                pass
+    return {"success": True}
 
 # Mount static files for the frontend
 custom_fe = os.environ.get("SQUIRRELMAP_FRONTEND_DIR")
