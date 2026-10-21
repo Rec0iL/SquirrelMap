@@ -129,6 +129,21 @@ def load_whisper_model(model_name: str = "base"):
         print(f"[WhisperService] Model '{model_name}' loaded in {time.time() - t0:.2f}s", flush=True)
     return _model_instance
 
+def _get_clean_subprocess_env() -> Dict[str, str]:
+    """
+    Returns an environment dictionary stripped of PyInstaller isolation variables
+    (LD_LIBRARY_PATH, PYTHONHOME, PYTHONPATH) so external Python runtimes execute cleanly.
+    """
+    sub_env = os.environ.copy()
+    sub_env.pop("PYTHONHOME", None)
+    sub_env.pop("PYTHONPATH", None)
+    sub_env.pop("_MEIPASS2", None)
+    if "LD_LIBRARY_PATH_ORIG" in sub_env:
+        sub_env["LD_LIBRARY_PATH"] = sub_env["LD_LIBRARY_PATH_ORIG"]
+    else:
+        sub_env.pop("LD_LIBRARY_PATH", None)
+    return sub_env
+
 def save_uploaded_audio(file_bytes: bytes, original_filename: Optional[str] = None) -> tuple[str, str]:
     """Saves raw audio bytes to disk, returning (relative_filename, absolute_path)."""
     ext = ".webm"
@@ -169,6 +184,7 @@ async def _transcribe_via_cli(cli_path: str, file_path: str, model_name: str = "
         t0 = time.time()
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            env=_get_clean_subprocess_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
