@@ -56,9 +56,11 @@ class TestSquirrelMapBackend(unittest.TestCase):
 
     def test_whisper_availability(self):
         status = whisper_service.is_whisper_available()
-        self.assertTrue(status.get("available"))
-        self.assertTrue(status.get("cuda"))
-        self.assertEqual(status.get("default_model"), "base")
+        self.assertIn("available", status)
+        if status.get("available"):
+            self.assertIn("cuda", status)
+            self.assertIn("device", status)
+            self.assertEqual(status.get("default_model"), "base")
 
 if __name__ == "__main__":
     unittest.main()

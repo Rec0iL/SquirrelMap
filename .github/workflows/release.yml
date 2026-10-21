@@ -44,6 +44,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      - name: Run Backend Tests
+        run: |
+          python tests/test_backend.py
+
       - name: Build standalone Python backend with PyInstaller
         shell: bash
         run: |

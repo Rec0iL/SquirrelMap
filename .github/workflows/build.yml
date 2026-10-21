@@ -1,0 +1,100 @@
+name: Compile Multi-Platform Installers (CI)
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} Installers
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            dist_cmd: npm run dist:linux
+            data_sep: ":"
+          - os: windows-latest
+            platform: windows
+            dist_cmd: npm run dist:win
+            data_sep: ";"
+          - os: macos-latest
+            platform: macos
+            dist_cmd: npm run dist:mac
+            data_sep: ":"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run Backend Tests
+        run: |
+          python tests/test_backend.py
+
+      - name: Build standalone Python backend with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --name squirrelmap-backend run.py \
+            --add-data "frontend${{ matrix.data_sep }}frontend" \
+            --add-data "ideas${{ matrix.data_sep }}ideas"
+          
+          mkdir -p dist-backend
+          cp -r dist/squirrelmap-backend/* dist-backend/
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Linux build dependencies (RPM)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build Electron Installers
+        run: ${{ matrix.dist_cmd }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Installer Artifacts (Actions Run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: squirrelmap-${{ matrix.platform }}-installers
+          path: |
+            release/*.deb
+            release/*.rpm
+            release/*.AppImage
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+          retention-days: 14
+          if-no-files-found: warn
