@@ -358,8 +358,7 @@ You have full authority to suggest or create new project categories whenever ide
 
 WORKING DIRECTORY & PROJECT VAULT:
 Your working directory is: {DATA_DIR}
-All project Markdown files are stored in: {IDEAS_DIR} (or './ideas', or '{user_vault}/ideas')
-You have full read/write permission in this directory.
+Project Markdown files are stored in: {IDEAS_DIR} (read-only for you; do not modify it).
 
 WHEN THE USER ASKS YOU TO CREATE, ADD, OR STASH A PROJECT:
 1. Always format your project note with full YAML frontmatter and structured markdown:
@@ -381,8 +380,8 @@ connections: []
 | Item | Qty | Notes |
 | --- | --- | --- |
 
-2. If you have file-writing or MCP tools available, write the markdown file directly to {IDEAS_DIR}/<id>.md.
-3. Always include the complete Markdown block (with YAML frontmatter) in your response so the user can review it and SquirrelMap can auto-index it.
+2. Do NOT try to write or edit any files yourself. SquirrelMap saves and indexes the project automatically from your reply.
+3. Always include the complete Markdown block (with YAML frontmatter) in your response, wrapped in a ```markdown code fence.
 Always be concise, practical, creative, and reference specific components and connections."""
 
         referenced_context = ""

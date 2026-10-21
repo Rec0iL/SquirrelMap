@@ -139,14 +139,24 @@ def parse_markdown_file(file_path: str) -> Optional[Dict[str, Any]]:
                     cols = [c.strip() for c in line.split("|") if c.strip()]
                     if cols:
                         item_name = cols[0]
+                        qty = 1
                         notes = cols[1] if len(cols) > 1 else ""
-                        bom_items.append({"item": item_name, "qty": 1, "notes": notes, "link": ""})
+                        if len(cols) > 1:
+                            qm = re.match(r"^(\d+)\b", cols[1])
+                            if qm:
+                                qty = max(1, int(qm.group(1)))
+                                notes = cols[2] if len(cols) > 2 else ""
+                        bom_items.append({"item": item_name, "qty": qty, "notes": notes, "link": ""})
 
         connections = frontmatter_data.get("connections", [])
 
         description = frontmatter_data.get("description", "")
         if not description:
-            paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not p.strip().startswith("#")]
+            paragraphs = []
+            for p in body.split("\n\n"):
+                lines = [l for l in p.strip().split("\n") if l.strip() and not l.strip().startswith("#")]
+                if lines and not lines[0].lstrip().startswith(("|", "-", "*", "```")):
+                    paragraphs.append(" ".join(l.strip() for l in lines))
             description = paragraphs[0][:200] if paragraphs else ""
 
         created_at = frontmatter_data.get("created_at", datetime.now().isoformat())
@@ -233,13 +243,23 @@ def parse_markdown_string(raw: str, default_id: Optional[str] = None) -> Optiona
                     cols = [c.strip() for c in line.split("|") if c.strip()]
                     if cols:
                         item_name = cols[0]
+                        qty = 1
                         notes = cols[1] if len(cols) > 1 else ""
-                        bom_items.append({"item": item_name, "qty": 1, "notes": notes, "link": ""})
+                        if len(cols) > 1:
+                            qm = re.match(r"^(\d+)\b", cols[1])
+                            if qm:
+                                qty = max(1, int(qm.group(1)))
+                                notes = cols[2] if len(cols) > 2 else ""
+                        bom_items.append({"item": item_name, "qty": qty, "notes": notes, "link": ""})
 
         connections = frontmatter_data.get("connections", [])
         description = frontmatter_data.get("description", "")
         if not description:
-            paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not p.strip().startswith("#")]
+            paragraphs = []
+            for p in body.split("\n\n"):
+                lines = [l for l in p.strip().split("\n") if l.strip() and not l.strip().startswith("#")]
+                if lines and not lines[0].lstrip().startswith(("|", "-", "*", "```")):
+                    paragraphs.append(" ".join(l.strip() for l in lines))
             description = paragraphs[0][:200] if paragraphs else ""
 
         return {
@@ -261,9 +281,9 @@ def parse_markdown_string(raw: str, default_id: Optional[str] = None) -> Optiona
 
 def extract_idea_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Extracts and parses frontmatter project block from an assistant message if present."""
-    match = re.search(r"(---\s*\n\s*title:.+?\n---\s*\n.*)", text, re.DOTALL)
+    match = re.search(r"```(?:markdown|md|yaml)?\s*\n(---\s*\n\s*title:.+?\n---\s*\n.*?)\n?```", text, re.DOTALL)
     if not match:
-        match = re.search(r"```(?:markdown)?\s*\n(---\s*\n\s*title:.+?\n---\s*\n.*?)```", text, re.DOTALL)
+        match = re.search(r"(---\s*\n\s*title:.+?\n---\s*\n.*)", text, re.DOTALL)
     if match:
         raw_block = match.group(1).strip()
         return parse_markdown_string(raw_block)
