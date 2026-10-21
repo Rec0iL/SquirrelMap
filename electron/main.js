@@ -86,8 +86,27 @@ function startBackend() {
   const userDataDir = initializeUserData();
   const { command, args } = getBackendExecutable();
 
+  // Ensure PATH contains user bin directories (~/.local/bin, ~/.platformio_py310/bin, etc.)
+  const userHome = app.getPath('home');
+  const pathSep = process.platform === 'win32' ? ';' : ':';
+  const extraPaths = process.platform === 'win32'
+    ? [
+        path.join(userHome, 'AppData', 'Roaming', 'Python', 'Scripts'),
+        path.join(userHome, 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'Scripts')
+      ]
+    : [
+        path.join(userHome, '.local', 'bin'),
+        path.join(userHome, '.platformio_py310', 'bin'),
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin'
+      ];
+  const curPath = process.env.PATH || '';
+  const augmentedPath = extraPaths.concat(curPath.split(pathSep)).filter(Boolean).join(pathSep);
+
   const env = {
     ...process.env,
+    PATH: augmentedPath,
     PORT: String(BACKEND_PORT),
     SQUIRRELMAP_DATA_DIR: userDataDir,
     SQUIRRELMAP_FRONTEND_DIR: path.join(__dirname, '..', 'frontend'),
