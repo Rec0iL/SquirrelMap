@@ -206,6 +206,19 @@ class McpChatManager {
           if (m.includes('haiku')) parsed.model = 'haiku';
           else if (m.includes('opus')) parsed.model = 'opus';
           else parsed.model = 'sonnet';
+        } else if (parsed.provider === 'agy') {
+          const validAgy = [
+            'gemini-3.8-flash-low', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-high',
+            'gemini-4-argon-low', 'gemini-4-argon-medium', 'gemini-4-argon-high',
+            'claude-sonnet-5-5-medium', 'claude-opus-5-5-high', 'gpt-oss-120b-medium'
+          ];
+          if (!validAgy.includes(parsed.model)) {
+            const m = (parsed.model || '').toLowerCase();
+            if (m.includes('sonnet')) parsed.model = 'claude-sonnet-5-5-medium';
+            else if (m.includes('opus')) parsed.model = 'claude-opus-5-5-high';
+            else if (m.includes('high')) parsed.model = 'gemini-3.8-flash-high';
+            else parsed.model = 'gemini-3.8-flash-low';
+          }
         }
         return parsed;
       }
@@ -913,23 +926,284 @@ class McpChatManager {
       loadingElem.remove();
 
       if (data.success && data.response) {
-        this.appendMessage("assistant", data.response, true);
+        let respText = data.response;
+        if (data.attempts && data.attempts > 1) {
+          respText += `\n\n*(⚡ AI diagnosed failure and self-corrected on attempt ${data.attempts})*`;
+        }
+        this.appendMessage("assistant", respText, true);
         this.history.push({ role: "assistant", content: data.response });
 
         // Refresh graph data in case agent created or linked ideas
         await this.app.loadGraphData();
       } else {
+        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+          this.history.pop();
+        }
         const errMsg = data.error || "Failed to receive response from agent.";
-        this.appendMessage("assistant", `⚠️ **Error (${this.agentConfig.provider})**: ${errMsg}`, true);
+        this.appendErrorCard({
+          provider: this.agentConfig.provider || "agy",
+          model: data.model || this.agentConfig.model,
+          errorMessage: errMsg,
+          originalText: text,
+          referencedNodes: referencedNodes,
+          bubbleHtml: bubbleHtml
+        });
       }
     } catch (err) {
       loadingElem.remove();
-      this.appendMessage("assistant", `⚠️ **Connection Error**: ${err.message}`, true);
+      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+        this.history.pop();
+      }
+      this.appendErrorCard({
+        provider: this.agentConfig.provider || "agy",
+        model: this.agentConfig.model,
+        errorMessage: err.message,
+        originalText: text,
+        referencedNodes: referencedNodes,
+        bubbleHtml: bubbleHtml
+      });
     } finally {
       this.isBusy = false;
       this.btnSend.disabled = false;
       if (this.input) this.input.focus();
     }
+  }
+
+  appendErrorCard({ provider, model, errorMessage, originalText, referencedNodes, bubbleHtml }) {
+    const msgDiv = document.createElement("div");
+    msgDiv.className = "chat-message assistant chat-error-container";
+
+    const avatar = document.createElement("div");
+    avatar.className = "chat-message-avatar chat-error-avatar";
+    avatar.textContent = "⚠️";
+
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble chat-error-bubble";
+
+    const errorId = `err_${Date.now()}`;
+    const escapedMsg = this.escapeHtml(errorMessage || "Unknown error");
+    const escapedModel = this.escapeHtml(model || "");
+
+    bubble.innerHTML = `
+      <div class="chat-error-header">
+        <span class="chat-error-badge">Execution Error (${(provider || "AI").toUpperCase()})</span>
+        <span class="chat-error-model">${escapedModel}</span>
+      </div>
+      <div class="chat-error-explanation">
+        Processing halted because the agent encountered an error:
+      </div>
+      <pre class="chat-error-details">${escapedMsg}</pre>
+      <div class="chat-error-actions">
+        <button class="chat-error-btn btn-tell-ai" id="btnTellAi_${errorId}" title="Feeds error details back to AI so it diagnoses what went wrong and has another go">
+          🔄 Tell AI what went wrong & retry
+        </button>
+        <button class="chat-error-btn btn-retry-direct" id="btnRetry_${errorId}" title="Re-execute the exact same request">
+          🔁 Retry
+        </button>
+        <button class="chat-error-btn btn-edit-request" id="btnEdit_${errorId}" title="Restore prompt into the input field for editing">
+          ✏️ Edit prompt
+        </button>
+      </div>
+    `;
+
+    msgDiv.appendChild(avatar);
+    msgDiv.appendChild(bubble);
+    this.messagesContainer.appendChild(msgDiv);
+    this.scrollToBottom();
+
+    const btnTellAi = bubble.querySelector(`#btnTellAi_${errorId}`);
+    if (btnTellAi) {
+      btnTellAi.addEventListener("click", () => {
+        msgDiv.remove();
+        this.tellAiWhatWentWrongAndRetry({
+          originalText,
+          errorMessage,
+          referencedNodes
+        });
+      });
+    }
+
+    const btnRetry = bubble.querySelector(`#btnRetry_${errorId}`);
+    if (btnRetry) {
+      btnRetry.addEventListener("click", () => {
+        msgDiv.remove();
+        this.resendRequest(originalText, referencedNodes, bubbleHtml);
+      });
+    }
+
+    const btnEdit = bubble.querySelector(`#btnEdit_${errorId}`);
+    if (btnEdit) {
+      btnEdit.addEventListener("click", () => {
+        msgDiv.remove();
+        this.restoreInput(originalText, referencedNodes);
+      });
+    }
+
+    return msgDiv;
+  }
+
+  async tellAiWhatWentWrongAndRetry({ originalText, errorMessage, referencedNodes }) {
+    if (this.isBusy) return;
+
+    const correctivePrompt = `My previous request encountered an execution error:\n> ${errorMessage}\n\nPlease diagnose what went wrong, correct the approach, and fulfill the original request:\n\n${originalText}`;
+
+    const displayHtml = `
+      <div class="chat-self-correct-tag">🔄 <em>Self-Correction Retry</em></div>
+      <div style="font-size: 0.82rem; margin-top: 4px;"><strong>Diagnosing error:</strong> <code>${this.escapeHtml(errorMessage.substring(0, 100))}...</code></div>
+      <div style="font-size: 0.85rem; margin-top: 4px; color: var(--text-secondary);">${this.escapeHtml(originalText)}</div>
+    `;
+    this.appendUserMessage(displayHtml, referencedNodes);
+    this.history.push({ role: "user", content: correctivePrompt });
+
+    this.isBusy = true;
+    this.btnSend.disabled = true;
+    const loadingElem = this.appendLoadingIndicator();
+
+    try {
+      const resp = await fetch("/api/mcp/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: correctivePrompt,
+          history: this.history,
+          provider: this.agentConfig.provider || "agy",
+          model: this.agentConfig.model,
+          endpoint_url: this.agentConfig.endpoint_url,
+          api_key: this.agentConfig.api_key,
+          referenced_ideas: referencedNodes
+        })
+      });
+
+      const data = await resp.json();
+      loadingElem.remove();
+
+      if (data.success && data.response) {
+        let respText = data.response;
+        if (data.attempts && data.attempts > 1) {
+          respText += `\n\n*(⚡ AI self-corrected on backend attempt ${data.attempts})*`;
+        }
+        this.appendMessage("assistant", respText, true);
+        this.history.push({ role: "assistant", content: data.response });
+        await this.app.loadGraphData();
+      } else {
+        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+          this.history.pop();
+        }
+        const errMsg = data.error || "Failed to receive response from agent.";
+        this.appendErrorCard({
+          provider: this.agentConfig.provider || "agy",
+          model: data.model || this.agentConfig.model,
+          errorMessage: errMsg,
+          originalText,
+          referencedNodes,
+          bubbleHtml: displayHtml
+        });
+      }
+    } catch (err) {
+      loadingElem.remove();
+      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+        this.history.pop();
+      }
+      this.appendErrorCard({
+        provider: this.agentConfig.provider || "agy",
+        model: this.agentConfig.model,
+        errorMessage: err.message,
+        originalText,
+        referencedNodes,
+        bubbleHtml: displayHtml
+      });
+    } finally {
+      this.isBusy = false;
+      this.btnSend.disabled = false;
+      if (this.input) this.input.focus();
+    }
+  }
+
+  async resendRequest(text, referencedNodes, bubbleHtml) {
+    if (this.isBusy) return;
+
+    this.appendUserMessage(bubbleHtml, referencedNodes);
+    this.history.push({ role: "user", content: text });
+
+    this.isBusy = true;
+    this.btnSend.disabled = true;
+    const loadingElem = this.appendLoadingIndicator();
+
+    try {
+      const resp = await fetch("/api/mcp/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          history: this.history,
+          provider: this.agentConfig.provider || "agy",
+          model: this.agentConfig.model,
+          endpoint_url: this.agentConfig.endpoint_url,
+          api_key: this.agentConfig.api_key,
+          referenced_ideas: referencedNodes
+        })
+      });
+
+      const data = await resp.json();
+      loadingElem.remove();
+
+      if (data.success && data.response) {
+        let respText = data.response;
+        if (data.attempts && data.attempts > 1) {
+          respText += `\n\n*(⚡ AI self-corrected on attempt ${data.attempts})*`;
+        }
+        this.appendMessage("assistant", respText, true);
+        this.history.push({ role: "assistant", content: data.response });
+        await this.app.loadGraphData();
+      } else {
+        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+          this.history.pop();
+        }
+        const errMsg = data.error || "Failed to receive response from agent.";
+        this.appendErrorCard({
+          provider: this.agentConfig.provider || "agy",
+          model: data.model || this.agentConfig.model,
+          errorMessage: errMsg,
+          originalText: text,
+          referencedNodes: referencedNodes,
+          bubbleHtml: bubbleHtml
+        });
+      }
+    } catch (err) {
+      loadingElem.remove();
+      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+        this.history.pop();
+      }
+      this.appendErrorCard({
+        provider: this.agentConfig.provider || "agy",
+        model: this.agentConfig.model,
+        errorMessage: err.message,
+        originalText: text,
+        referencedNodes: referencedNodes,
+        bubbleHtml: bubbleHtml
+      });
+    } finally {
+      this.isBusy = false;
+      this.btnSend.disabled = false;
+      if (this.input) this.input.focus();
+    }
+  }
+
+  restoreInput(text, referencedNodes) {
+    if (!this.input) return;
+    this.input.innerHTML = "";
+    if (referencedNodes && referencedNodes.length > 0) {
+      referencedNodes.forEach(node => {
+        const card = this.createInlineCardElement(node, true);
+        this.input.appendChild(card);
+        this.input.appendChild(document.createTextNode(" "));
+      });
+    }
+    if (text) {
+      this.input.appendChild(document.createTextNode(text));
+    }
+    this.adjustInputHeight();
+    this.input.focus();
   }
 }
 

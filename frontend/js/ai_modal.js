@@ -134,7 +134,8 @@ class IdeaModalsController {
       if (data.success && data.data) {
         this.stagedIdea = data.data;
         this.renderBrainstormPreview(this.stagedIdea);
-        this.app.showToast('Idea generated successfully!', 'success');
+        const note = data.attempts && data.attempts > 1 ? ` (self-corrected on attempt ${data.attempts})` : '';
+        this.app.showToast(`Idea generated successfully!${note}`, 'success');
       } else {
         this.app.showToast(data.error || 'Failed to generate idea.', 'error');
       }

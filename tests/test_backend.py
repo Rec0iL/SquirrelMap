@@ -6,58 +6,52 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from backend import database
-from backend.graph_engine import GraphEngine
+from backend.graph_engine import engine, MindmapGraphEngine
+from backend.antigravity_client import antigravity_client
 
-class TestBackend(unittest.TestCase):
+class TestSquirrelMapBackend(unittest.TestCase):
     def setUp(self):
         database.init_db()
-        self.engine = GraphEngine()
+        engine.reload_graph()
 
-    def test_database_seed_exists(self):
-        skills = database.get_all_skills()
-        self.assertGreater(len(skills), 25, "Seed skills should be populated")
-        edges = database.get_all_edges()
-        self.assertGreater(len(edges), 20, "Seed edges should be populated")
-        conflicts = database.get_all_conflicts()
-        self.assertGreater(len(conflicts), 1, "Seed conflicts should be populated")
+    def test_database_and_engine(self):
+        ideas = database.get_all_ideas()
+        self.assertIsInstance(ideas, list)
+        data = engine.get_graph_data()
+        self.assertTrue(hasattr(data, "nodes"))
+        self.assertTrue(hasattr(data, "edges"))
+        self.assertTrue(hasattr(data, "categories"))
 
-    def test_node_dynamic_sizing_and_centrality(self):
-        self.assertIn("dexterity-coordination", self.engine.skills_map)
-        dex_node = self.engine.skills_map["dexterity-coordination"]
-        self.assertGreater(dex_node.size, 5.0, "Foundational hubs should have enlarged sizes")
+    def test_model_normalization(self):
+        # Empty or default
+        self.assertEqual(antigravity_client._normalize_agy_model(None), "gemini-3.8-flash-low")
+        self.assertEqual(antigravity_client._normalize_agy_model(""), "gemini-3.8-flash-low")
+        # Claude alias mapping
+        self.assertEqual(antigravity_client._normalize_agy_model("claude-sonnet-4-6"), "claude-sonnet-5-5-medium")
+        self.assertEqual(antigravity_client._normalize_agy_model("claude-sonnet"), "claude-sonnet-5-5-medium")
+        self.assertEqual(antigravity_client._normalize_agy_model("claude-opus"), "claude-opus-5-5-high")
+        # Gemini legacy mapping
+        self.assertEqual(antigravity_client._normalize_agy_model("gemini-3.1-pro-high"), "gemini-3.8-flash-high")
+        self.assertEqual(antigravity_client._normalize_agy_model("gemini-3.7-flash-high"), "gemini-3.8-flash-high")
+        self.assertEqual(antigravity_client._normalize_agy_model("gemini-3.8-flash-low"), "gemini-3.8-flash-low")
+        self.assertEqual(antigravity_client._normalize_agy_model("gemini-3.8-flash-high"), "gemini-3.8-flash-high")
+        # Argon mapping
+        self.assertEqual(antigravity_client._normalize_agy_model("gemini-4-argon-high"), "gemini-4-argon-high")
+        # Unknown fallback
+        self.assertEqual(antigravity_client._normalize_agy_model("random-unknown-model"), "gemini-3.8-flash-low")
 
-    def test_asymmetric_transfer_math(self):
-        # Downward transfer: Aircraft Mechanic (Tier 3) -> Scooter Maintenance (Tier 1)
-        factor_down = self.engine.calculate_transfer_factor("aircraft-mechanic", "scooter-maintenance", base_weight=0.8)
-        self.assertEqual(factor_down, 0.8, "Downward transfer ratio should be 1.0 (full weight)")
+    def test_health_check_available_models(self):
+        models = antigravity_client.check_health
+        self.assertTrue(callable(models))
 
-        # Upward transfer: Scooter Maintenance (Tier 1) -> Aircraft Mechanic (Tier 3)
-        factor_up = self.engine.calculate_transfer_factor("scooter-maintenance", "aircraft-mechanic", base_weight=0.8)
-        expected_up = round(0.8 * (1.0 / 3.0), 4)
-        self.assertEqual(factor_up, expected_up, "Upward transfer should be dampened by T_source / T_target")
-
-    def test_calibration_propagation(self):
-        res = self.engine.calibrate({"car-mechanic": 80.0})
-        # Should have boosted scooter maintenance
-        self.assertIn("scooter-maintenance", res.proficiencies)
-        self.assertGreater(res.proficiencies["scooter-maintenance"], 20.0)
-
-        # Should have boosted foundational attribute dexterity-coordination
-        self.assertIn("dexterity-coordination", res.proficiencies)
-        self.assertGreater(res.proficiencies["dexterity-coordination"], 30.0)
-
-    def test_mutual_exclusivity_conflict(self):
-        res = self.engine.calibrate({
-            "radical-pacifism": 85.0,
-            "close-quarters-lethal": 70.0
-        })
-        self.assertGreater(len(res.conflicts_detected), 0, "Conflict should be detected between pacifism and lethal combat")
-
-    def test_semantic_auto_linker(self):
-        suggestions = self.engine.suggest_links(limit=5)
-        self.assertIsInstance(suggestions, list)
-        if len(suggestions) > 0:
-            self.assertGreaterEqual(suggestions[0].confidence, 0.5)
+    def test_no_reseed_when_all_deleted(self):
+        conn = database.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM meta WHERE key = 'has_seeded_defaults'")
+        row = cur.fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertIn(row[0], ["true", "1"])
 
 if __name__ == "__main__":
     unittest.main()

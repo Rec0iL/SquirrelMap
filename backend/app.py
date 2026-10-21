@@ -134,12 +134,17 @@ async def propose_link_endpoint(payload: Dict[str, Any]):
 
 @app.post("/api/ai/brainstorm")
 async def brainstorm_endpoint(req: IdeaBrainstormRequest):
+    print(f"\n[API /api/ai/brainstorm] Idea: '{req.idea[:80]}...', Model: {req.model}, Category: {req.category}", flush=True)
     result = await antigravity_client.brainstorm_idea(
         idea_prompt=req.idea,
         category=req.category,
         existing_categories=engine.categories,
         model=req.model
     )
+    if result.get("success"):
+        print(f"[API /api/ai/brainstorm] Success (attempts: {result.get('attempts', 1)})", flush=True)
+    else:
+        print(f"[API /api/ai/brainstorm] Failed: {result.get('error')}", flush=True)
     return result
 
 @app.get("/api/ai/status")
@@ -204,6 +209,8 @@ async def mcp_chat_endpoint(req: McpChatRequest):
     if not message and req.referenced_ideas:
         message = "Please review and analyze this referenced project."
 
+    print(f"\n[API /api/mcp/chat] Incoming message: '{message[:80]}...' (provider: {req.provider or 'agy'}, model: {req.model}, refs: {len(req.referenced_ideas or [])})", flush=True)
+
     result = await antigravity_client.chat_with_agent(
         message=message,
         history=[{"role": m.role, "content": m.content} for m in req.history],
@@ -214,6 +221,14 @@ async def mcp_chat_endpoint(req: McpChatRequest):
         api_key=req.api_key
     )
 
+    if result.get("success"):
+        resp_len = len(result.get("response", ""))
+        attempts = result.get("attempts", 1)
+        print(f"[API /api/mcp/chat] Success (attempts: {attempts}, len: {resp_len} chars)", flush=True)
+    else:
+        err = result.get("error", "Unknown error")
+        print(f"[API /api/mcp/chat] Failure: {err}", flush=True)
+
     # Reload graph in case tools updated markdown files
     engine.reload_graph()
 
@@ -222,6 +237,7 @@ async def mcp_chat_endpoint(req: McpChatRequest):
         "response": result.get("response", ""),
         "provider": req.provider or "agy",
         "model": result.get("model", req.model),
+        "attempts": result.get("attempts", 1),
         "error": result.get("error"),
         "stats": {
             "total_ideas": len(engine.ideas_map),
