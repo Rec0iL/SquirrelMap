@@ -961,6 +961,9 @@ class McpChatManager {
 
       if (data.success && data.response) {
         let respText = data.response;
+        if (data.created_idea) {
+          respText += `\n\n> 🐿️ **Auto-Saved to Mindmap**: Added **${data.created_idea.title}** to \`${data.created_idea.category || "General"}\`!`;
+        }
         if (data.attempts && data.attempts > 1) {
           respText += `\n\n*(⚡ AI diagnosed failure and self-corrected on attempt ${data.attempts})*`;
         }
@@ -969,6 +972,12 @@ class McpChatManager {
 
         // Refresh graph data in case agent created or linked ideas
         await this.app.loadGraphData();
+        if (data.created_idea && this.app && this.app.graph3d) {
+          this.app.graph3d.focusOnNode(data.created_idea.id);
+          if (this.app.showToast) {
+            this.app.showToast(`Saved "${data.created_idea.title}" to your mindmap!`, "success");
+          }
+        }
       } else {
         if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
           this.history.pop();
@@ -1536,6 +1545,9 @@ class McpChatManager {
 
       if (chatData.success && chatData.response) {
         let respText = chatData.response;
+        if (chatData.created_idea) {
+          respText += `\n\n> 🐿️ **Auto-Saved to Mindmap**: Added **${chatData.created_idea.title}** to \`${chatData.created_idea.category || "General"}\`!`;
+        }
         if (chatData.attempts && chatData.attempts > 1) {
           respText += `\n\n*(⚡ AI diagnosed failure and self-corrected on attempt ${chatData.attempts})*`;
         }
@@ -1544,6 +1556,12 @@ class McpChatManager {
 
         // Refresh graph data in case agent created or linked ideas
         await this.app.loadGraphData();
+        if (chatData.created_idea && this.app && this.app.graph3d) {
+          this.app.graph3d.focusOnNode(chatData.created_idea.id);
+          if (this.app.showToast) {
+            this.app.showToast(`Saved "${chatData.created_idea.title}" to your mindmap!`, "success");
+          }
+        }
       } else {
         if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
           this.history.pop();

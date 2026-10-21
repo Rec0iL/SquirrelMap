@@ -18,12 +18,12 @@ from typing import Dict, Any, List, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-IDEAS_DIR = os.path.join(PROJECT_ROOT, "ideas")
-DB_PATH = os.path.join(PROJECT_ROOT, "backend", "mindmap.db")
 BACKEND_API_URL = "http://localhost:8766"
 
 sys.path.insert(0, PROJECT_ROOT)
 from backend import database
+IDEAS_DIR = getattr(database, "IDEAS_DIR", os.path.join(PROJECT_ROOT, "ideas"))
+DB_PATH = getattr(database, "DB_PATH", os.path.join(PROJECT_ROOT, "backend", "mindmap.db"))
 from backend.models import IdeaNode, IdeaEdge, BOMItem
 
 def notify_backend_reload():

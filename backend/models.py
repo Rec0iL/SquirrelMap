@@ -1,5 +1,20 @@
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+STATUS_MAP = {
+    "idea": "concept",
+    "draft": "concept",
+    "planned": "concept",
+    "backlog": "concept",
+    "new": "concept",
+    "active": "in-progress",
+    "wip": "in-progress",
+    "progress": "in-progress",
+    "building": "in-progress",
+    "done": "completed",
+    "finished": "completed",
+    "prototype": "prototyping"
+}
 
 IdeaStatus = Literal['concept', 'prototyping', 'in-progress', 'completed', 'archived']
 RelationType = Literal['shared_bom', 'synergy', 'depends_on', 'subproject', 'related']
@@ -29,6 +44,18 @@ class IdeaNode(BaseModel):
     in_degree: Optional[int] = 0
     out_degree: Optional[int] = 0
     size: Optional[float] = 1.0
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Any) -> str:
+        if not v or not isinstance(v, str):
+            return "concept"
+        s = v.strip().lower()
+        if s in STATUS_MAP:
+            return STATUS_MAP[s]
+        if s in ["concept", "prototyping", "in-progress", "completed", "archived"]:
+            return s
+        return "concept"
 
     def model_post_init(self, __context):
         if not self.name:

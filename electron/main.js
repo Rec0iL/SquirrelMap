@@ -50,7 +50,11 @@ function getBackendExecutable() {
 }
 
 function initializeUserData() {
-  const userDataDir = app.getPath('userData');
+  const userHome = app.getPath('home');
+  const visibleVaultDir = path.join(userHome, 'SquirrelMap');
+
+  // Support custom vault via SQUIRRELMAP_DATA_DIR if specified
+  const userDataDir = process.env.SQUIRRELMAP_DATA_DIR || app.getPath('userData');
   const userIdeasDir = path.join(userDataDir, 'ideas');
   
   if (!fs.existsSync(userIdeasDir)) {
@@ -77,6 +81,16 @@ function initializeUserData() {
         console.error('Failed to copy sample ideas:', err);
       }
     }
+  }
+
+  // Create convenient symlink in user's home folder: ~/SquirrelMap -> userDataDir
+  try {
+    if (!fs.existsSync(visibleVaultDir)) {
+      fs.symlinkSync(userDataDir, visibleVaultDir, 'dir');
+      console.log(`Created user-accessible vault link: ${visibleVaultDir} -> ${userDataDir}`);
+    }
+  } catch (err) {
+    // Non-fatal if symlink fails
   }
 
   return userDataDir;
@@ -121,7 +135,7 @@ function startBackend() {
 
   backendProcess = spawn(command, args, {
     env,
-    cwd: app.isPackaged ? path.dirname(command) : path.join(__dirname, '..'),
+    cwd: userDataDir, // ALWAYS use userDataDir as working directory!
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

@@ -101,7 +101,18 @@ def parse_markdown_file(file_path: str) -> Optional[Dict[str, Any]]:
             title = heading_match.group(1).strip() if heading_match else idea_id.replace("-", " ").title()
 
         category = frontmatter_data.get("category", "General")
-        status = frontmatter_data.get("status", "concept")
+        raw_status = frontmatter_data.get("status", "concept")
+        status_str = str(raw_status).strip().lower() if raw_status else "concept"
+        if status_str in ["idea", "draft", "planned", "backlog", "new"]:
+            status = "concept"
+        elif status_str in ["active", "wip", "progress", "building"]:
+            status = "in-progress"
+        elif status_str in ["done", "finished"]:
+            status = "completed"
+        elif status_str in ["concept", "prototyping", "in-progress", "completed", "archived"]:
+            status = status_str
+        else:
+            status = "concept"
         tags = frontmatter_data.get("tags", [])
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -147,6 +158,105 @@ def parse_markdown_file(file_path: str) -> Optional[Dict[str, Any]]:
         print(f"Error parsing markdown file {file_path}: {e}")
         return None
 
+
+def parse_markdown_string(raw: str, default_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Parses raw markdown content with frontmatter into an idea dictionary."""
+    try:
+        frontmatter_data = {}
+        body = raw
+
+        if "---" in raw:
+            parts = re.split(r"^---\s*$", raw, maxsplit=2, flags=re.MULTILINE)
+            if len(parts) >= 3:
+                frontmatter_str = parts[1]
+                body = parts[2].lstrip()
+                frontmatter_data = yaml.safe_load(frontmatter_str) or {}
+            elif len(parts) == 2:
+                frontmatter_data = yaml.safe_load(parts[1]) or {}
+
+        title = frontmatter_data.get("title") or frontmatter_data.get("name")
+        if not title:
+            heading_match = re.search(r"^#\s+(.+)$", body, flags=re.MULTILINE)
+            title = heading_match.group(1).strip() if heading_match else (default_id or "New Project")
+
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", title.lower()).strip("-")
+        idea_id = frontmatter_data.get("id") or default_id or slug or "new-project"
+
+        category = frontmatter_data.get("category", "General")
+        raw_status = frontmatter_data.get("status", "concept")
+        status_str = str(raw_status).strip().lower() if raw_status else "concept"
+        if status_str in ["idea", "draft", "planned", "backlog", "new"]:
+            status = "concept"
+        elif status_str in ["active", "wip", "progress", "building"]:
+            status = "in-progress"
+        elif status_str in ["done", "finished"]:
+            status = "completed"
+        elif status_str in ["concept", "prototyping", "in-progress", "completed", "archived"]:
+            status = status_str
+        else:
+            status = "concept"
+
+        tags = frontmatter_data.get("tags", [])
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+
+        raw_bom = frontmatter_data.get("bom", [])
+        bom_items = []
+        if isinstance(raw_bom, list):
+            for b in raw_bom:
+                if isinstance(b, dict) and "item" in b:
+                    bom_items.append({
+                        "item": str(b["item"]).strip(),
+                        "qty": int(b.get("qty", 1)),
+                        "notes": str(b.get("notes", "")),
+                        "link": str(b.get("link", ""))
+                    })
+                elif isinstance(b, str) and b.strip():
+                    bom_items.append({"item": b.strip(), "qty": 1, "notes": "", "link": ""})
+
+        # Also extract BOM table if body contains markdown table under ## BOM
+        if not bom_items and "## BOM" in body:
+            bom_section = body.split("## BOM")[1].split("##")[0]
+            for line in bom_section.split("\n"):
+                if "|" in line and not line.strip().startswith("| ---") and not line.strip().lower().startswith("| item") and not line.strip().lower().startswith("| teil"):
+                    cols = [c.strip() for c in line.split("|") if c.strip()]
+                    if cols:
+                        item_name = cols[0]
+                        notes = cols[1] if len(cols) > 1 else ""
+                        bom_items.append({"item": item_name, "qty": 1, "notes": notes, "link": ""})
+
+        connections = frontmatter_data.get("connections", [])
+        description = frontmatter_data.get("description", "")
+        if not description:
+            paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not p.strip().startswith("#")]
+            description = paragraphs[0][:200] if paragraphs else ""
+
+        return {
+            "id": idea_id,
+            "title": title,
+            "category": category,
+            "status": status,
+            "description": description,
+            "content_markdown": body,
+            "tags": tags,
+            "bom": bom_items,
+            "connections": connections,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        print(f"Error parsing markdown string: {e}")
+        return None
+
+def extract_idea_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """Extracts and parses frontmatter project block from an assistant message if present."""
+    match = re.search(r"(---\s*\n\s*title:.+?\n---\s*\n.*)", text, re.DOTALL)
+    if not match:
+        match = re.search(r"```(?:markdown)?\s*\n(---\s*\n\s*title:.+?\n---\s*\n.*?)```", text, re.DOTALL)
+    if match:
+        raw_block = match.group(1).strip()
+        return parse_markdown_string(raw_block)
+    return None
 
 def remove_connection_from_markdown_file(source_id: str, target_id: str):
     """Removes any connection from source_id to target_id from the markdown file on disk."""

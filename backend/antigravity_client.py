@@ -151,6 +151,8 @@ Respond ONLY with valid JSON matching this schema:
                 print(f"[Brainstorm ({selected_model}) Attempt {attempt}/{max_attempts}]: starting execution...", flush=True)
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
+                    cwd=DATA_DIR,
+                    env=_get_clean_subprocess_env(),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
@@ -341,11 +343,40 @@ Respond ONLY with valid JSON:
         provider = (provider or "agy").lower()
 
         # Build Context & Base Prompt
-        system_instruction = """You are the Creative Mindmap AI Partner.
+        user_vault = os.path.expanduser("~/SquirrelMap")
+        system_instruction = f"""You are the Creative Mindmap AI Partner.
 Your job is to manage, connect, organize, and expand the user's creative ideas and maker projects.
 Each project has a Markdown file, frontmatter metadata, a Bill of Materials (BOM), and connections.
 You help brainstorm, audit BOM parts for bulk purchasing synergies, link related projects, and curate ideas.
 You have full authority to suggest or create new project categories whenever ideas branch into new topics or domains. In SquirrelMap, categories are open-ended and dynamically generated from the projects.
+
+WORKING DIRECTORY & PROJECT VAULT:
+Your working directory is: {DATA_DIR}
+All project Markdown files are stored in: {IDEAS_DIR} (or './ideas', or '{user_vault}/ideas')
+You have full read/write permission in this directory.
+
+WHEN THE USER ASKS YOU TO CREATE, ADD, OR STASH A PROJECT:
+1. Always format your project note with full YAML frontmatter and structured markdown:
+---
+title: Project Title
+status: concept
+category: Category Name
+tags: [tag1, tag2]
+connections: []
+---
+
+# Project Title
+1-2 sentence overview and objectives.
+
+## Features
+- Key bulleted features
+
+## BOM
+| Item | Qty | Notes |
+| --- | --- | --- |
+
+2. If you have file-writing or MCP tools available, write the markdown file directly to {IDEAS_DIR}/<id>.md.
+3. Always include the complete Markdown block (with YAML frontmatter) in your response so the user can review it and SquirrelMap can auto-index it.
 Always be concise, practical, creative, and reference specific components and connections."""
 
         referenced_context = ""
@@ -423,6 +454,8 @@ Your task is to:
                 try:
                     proc = await asyncio.create_subprocess_exec(
                         *cmd,
+                        cwd=DATA_DIR,
+                        env=_get_clean_subprocess_env(),
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE
                     )
@@ -522,7 +555,7 @@ Your task is to:
                 print(f"[chat_with_agent:claude] Attempt {attempt}/{max_attempts} with model '{selected_model}'...", flush=True)
 
                 try:
-                    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    proc = await asyncio.create_subprocess_exec(*cmd, cwd=DATA_DIR, env=_get_clean_subprocess_env(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90.0)
                     raw_out = stdout.decode().strip()
                     err_out = stderr.decode().strip()
@@ -628,7 +661,7 @@ Your task is to:
                 print(f"[chat_with_agent:opencode] Attempt {attempt}/{max_attempts}...", flush=True)
 
                 try:
-                    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    proc = await asyncio.create_subprocess_exec(*cmd, cwd=DATA_DIR, env=_get_clean_subprocess_env(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90.0)
                     out = stdout.decode().strip()
                     err = stderr.decode().strip()

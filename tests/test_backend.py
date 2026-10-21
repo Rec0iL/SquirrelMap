@@ -63,5 +63,25 @@ class TestSquirrelMapBackend(unittest.TestCase):
             self.assertIn("device", status)
             self.assertEqual(status.get("default_model"), "base")
 
+    def test_status_normalization_and_extraction(self):
+        sample = """Here is the proposal:
+---
+title: ChronoFlow
+status: idea
+category: Kinetic Art
+tags: [stepper, esp32]
+---
+# ChronoFlow
+An overview.
+## BOM
+| Item | Spec |
+| ESP32-S3 | Controller |
+"""
+        extracted = database.extract_idea_from_text(sample)
+        self.assertIsNotNone(extracted)
+        self.assertEqual(extracted["title"], "ChronoFlow")
+        self.assertEqual(extracted["status"], "concept")
+        self.assertEqual(len(extracted["bom"]), 1)
+
 if __name__ == "__main__":
     unittest.main()

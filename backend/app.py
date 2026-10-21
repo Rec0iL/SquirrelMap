@@ -259,10 +259,22 @@ async def mcp_chat_endpoint(req: McpChatRequest):
         is_voice=req.is_voice
     )
 
+    created_idea = None
     if result.get("success"):
         resp_len = len(result.get("response", ""))
         attempts = result.get("attempts", 1)
         print(f"[API /api/mcp/chat] Success (attempts: {attempts}, len: {resp_len} chars)", flush=True)
+
+        # Auto-detect and save project notes drafted with YAML frontmatter
+        extracted = database.extract_idea_from_text(result.get("response", ""))
+        if extracted:
+            try:
+                idea_obj = IdeaNode(**extracted)
+                database.save_or_update_idea(idea_obj)
+                created_idea = idea_obj.model_dump()
+                print(f"[API /api/mcp/chat] Auto-saved parsed project note: '{idea_obj.title}' ({idea_obj.id})", flush=True)
+            except Exception as save_err:
+                print(f"[API /api/mcp/chat] Note auto-save warning: {save_err}", flush=True)
     else:
         err = result.get("error", "Unknown error")
         print(f"[API /api/mcp/chat] Failure: {err}", flush=True)
@@ -273,6 +285,7 @@ async def mcp_chat_endpoint(req: McpChatRequest):
     return {
         "success": result.get("success", False),
         "response": result.get("response", ""),
+        "created_idea": created_idea,
         "provider": req.provider or "agy",
         "model": result.get("model", req.model),
         "attempts": result.get("attempts", 1),
