@@ -69,13 +69,23 @@ class AntigravityClient:
 
         selected_model = model or "gemini-3.8-flash-low"
         cats_str = ", ".join(existing_categories) if existing_categories else "General"
+        
+        if category:
+            cat_guidance = f"The user requested category: '{category}'. Use this or refine it."
+        else:
+            cat_guidance = (
+                f"Existing categories in this mindmap: [{cats_str}]. "
+                "You have full creative authority to either select an existing category if it is a natural fit, "
+                "OR CREATE A BRAND NEW CATEGORY (e.g. 'Robotics', 'Audio Synthesizers', 'Optics & Lasers', 'Biotech', 'Wearables', 'Woodworking') "
+                "if this project opens a new domain or theme."
+            )
 
         prompt = f"""You are the Creative Idea Mindmap Architect.
 The user wants to add an idea/project to their creative mindmap:
 "{idea_prompt}"
 
-Available categories currently in this mindmap: [{cats_str}].
-Choose the most fitting category, or propose a brand new clean category name if this idea opens a new creative domain.
+Category Instructions:
+{cat_guidance}
 
 Respond ONLY with valid JSON matching this schema:
 {{
@@ -228,6 +238,7 @@ Respond ONLY with valid JSON:
 Your job is to manage, connect, organize, and expand the user's creative ideas and maker projects.
 Each project has a Markdown file, frontmatter metadata, a Bill of Materials (BOM), and connections.
 You help brainstorm, audit BOM parts for bulk purchasing synergies, link related projects, and curate ideas.
+You have full authority to suggest or create new project categories whenever ideas branch into new topics or domains. In SquirrelMap, categories are open-ended and dynamically generated from the projects.
 Always be concise, practical, creative, and reference specific components and connections."""
 
         referenced_context = ""

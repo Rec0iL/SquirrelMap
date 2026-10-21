@@ -150,6 +150,12 @@ class IdeaModalsController {
     this.diffPreviewSection.style.display = 'block';
     this.btnCommitMerge.disabled = false;
 
+    const existingCats = (this.app.allNodes || []).map(n => n.category).filter(Boolean);
+    const isNewCat = idea.category && !existingCats.includes(idea.category);
+    const newCatBadge = isNewCat 
+      ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.68rem; padding: 2px 6px;">✨ New Category Created by AI</span>'
+      : '';
+
     const bomList = (idea.bom || []).map(b => `
       <div style="font-size: 0.78rem; display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
         <span>📦 <strong>${b.item}</strong> (x${b.qty || 1})</span>
@@ -159,12 +165,17 @@ class IdeaModalsController {
 
     this.brainstormPreviewCard.innerHTML = `
       <div class="bulk-card-header">
-        <div>
-          <div class="bulk-card-title">${idea.title}</div>
-          <div style="font-size: 0.74rem; color: #38bdf8; margin-top: 2px;">📁 ${idea.category} · Status: <strong>${idea.status}</strong></div>
+        <div style="flex: 1;">
+          <div class="bulk-card-title" style="margin-bottom: 6px;">${idea.title}</div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.74rem; color: #38bdf8;">
+            <span>📁 Category:</span>
+            <input type="text" id="previewCategoryInput" class="form-input" list="categoryDatalist" style="width: 170px; height: 26px; font-size: 0.74rem; padding: 2px 8px;" value="${idea.category || 'General'}">
+            ${newCatBadge}
+            <span style="color: var(--text-muted); margin-left: 6px;">Status: <strong>${idea.status}</strong></span>
+          </div>
         </div>
       </div>
-      <div style="font-size: 0.8rem; color: var(--text-secondary); margin: 6px 0;">${idea.description || ''}</div>
+      <div style="font-size: 0.8rem; color: var(--text-secondary); margin: 8px 0;">${idea.description || ''}</div>
       <div style="font-size: 0.76rem; font-weight: 700; color: #f8fafc; margin-top: 6px;">Bill of Materials (BOM):</div>
       <div style="margin-top: 4px; display: flex; flex-direction: column; gap: 2px;">
         ${bomList}
@@ -175,6 +186,9 @@ class IdeaModalsController {
   async commitStagedIdea() {
     if (!this.stagedIdea) return;
 
+    const catInput = document.getElementById('previewCategoryInput');
+    const finalCategory = (catInput && catInput.value.trim()) || this.stagedIdea.category || 'General';
+
     this.btnCommitMerge.disabled = true;
     this.btnCommitMerge.textContent = 'Saving to Markdown...';
 
@@ -182,7 +196,7 @@ class IdeaModalsController {
       const payload = {
         id: this.stagedIdea.id,
         title: this.stagedIdea.title,
-        category: this.stagedIdea.category || 'General',
+        category: finalCategory,
         status: this.stagedIdea.status || 'concept',
         description: this.stagedIdea.description || '',
         content_markdown: this.stagedIdea.markdown_content || `# ${this.stagedIdea.title}\n\n${this.stagedIdea.description}\n`,

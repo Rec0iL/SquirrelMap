@@ -125,14 +125,17 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: clamp(6px, 1.2vw, 14px);
   background: var(--glass-panel);
   backdrop-filter: blur(var(--blur-amt));
   -webkit-backdrop-filter: blur(var(--blur-amt));
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  padding: 0 18px;
+  padding: 0 clamp(8px, 1.2vw, 18px);
   box-shadow: var(--glass-shadow);
   z-index: 500;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
   transition: all 0.3s ease;
 }
 
@@ -166,7 +169,10 @@ body {
 /* Search bar with instant autocomplete dropdown */
 .search-container {
   position: relative;
-  width: 260px;
+  width: 240px;
+  min-width: 120px;
+  flex-shrink: 1;
+  transition: width 0.25s ease;
 }
 
 .search-input {
@@ -190,10 +196,10 @@ body {
 
 .search-icon {
   position: absolute;
-  left: 11px;
+  left: 10px;
   top: 10px;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   fill: var(--text-muted);
   pointer-events: none;
 }
@@ -245,10 +251,11 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  max-width: min(780px, 45vw);
-  min-width: 0;
-  flex-shrink: 1;
+  flex: 1 1 auto;
+  min-width: 60px;
+  max-width: 650px;
   position: relative;
+  overflow: hidden;
 }
 
 .pills-scroll-btn {
@@ -399,7 +406,7 @@ body {
 
 .btn-action {
   height: 36px;
-  padding: 0 14px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -410,7 +417,14 @@ body {
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.2s ease;
+}
+
+.btn-action .btn-label {
+  display: inline-block;
+  white-space: nowrap;
 }
 
 .btn-action:hover {
@@ -2692,4 +2706,171 @@ body {
 
 .chat-bubble .inline-node-card {
   margin: 1px 4px;
+}
+
+/* ==========================================================================
+   RESPONSIVE TOP NAVBAR & SMALL SCREEN OPTIMIZATIONS
+   ========================================================================== */
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 1. Standard Desktop (1350px - 1550px): Compact search and compress action buttons */
+@media (max-width: 1550px) {
+  .search-container {
+    width: 190px;
+  }
+  .search-input:focus {
+    width: 240px;
+  }
+  .btn-action {
+    padding: 0 10px;
+    font-size: 0.76rem;
+    gap: 4px;
+  }
+  .nav-theme-select {
+    max-width: 125px;
+  }
+}
+
+/* 2. Narrow Desktop (1150px - 1350px): Hide labels on secondary buttons */
+@media (max-width: 1350px) {
+  #btnCreateNewIdea .btn-label,
+  #btnToggleMultiSelect .btn-label {
+    display: none !important;
+  }
+  #btnCreateNewIdea,
+  #btnToggleMultiSelect {
+    padding: 0 10px;
+  }
+  .search-container {
+    width: 150px;
+  }
+  .search-input:focus {
+    width: 210px;
+  }
+  .nav-theme-select {
+    max-width: 110px;
+  }
+}
+
+/* 3. Compact Screens (900px - 1150px): Collapse all action buttons to icons */
+@media (max-width: 1150px) {
+  .btn-action .btn-label {
+    display: none !important;
+  }
+  .btn-action {
+    padding: 0 8px !important;
+    height: 34px;
+    gap: 2px;
+  }
+  .btn-icon {
+    width: 32px;
+    height: 32px;
+  }
+  .nav-actions {
+    gap: 4px !important;
+  }
+  .nav-theme-select {
+    display: none !important;
+  }
+  .search-container {
+    width: 120px;
+  }
+  .search-input {
+    font-size: 0.8rem;
+    padding: 0 8px 0 32px !important;
+  }
+  .search-icon {
+    left: 9px !important;
+    top: 10px !important;
+    width: 14px !important;
+    height: 14px !important;
+  }
+  .brand-title {
+    font-size: 1.02rem !important;
+  }
+  .hud-view-toolbar {
+    top: 78px;
+    left: 16px;
+    gap: 6px;
+  }
+  .hud-mode-pill {
+    padding: 3px 8px;
+    font-size: 0.72rem;
+  }
+  .hud-select {
+    font-size: 0.72rem;
+  }
+}
+
+/* 4. Mobile & Small Split-Screen (< 900px): Clean mobile search button & compact bar */
+@media (max-width: 900px) {
+  .top-navbar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    height: 52px;
+    padding: 0 8px;
+    gap: 5px;
+  }
+  .brand-title {
+    display: none !important;
+  }
+  .search-container {
+    width: 34px !important;
+    min-width: 34px !important;
+  }
+  .search-input {
+    width: 34px !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border-color: transparent !important;
+    color: transparent !important;
+    cursor: pointer;
+  }
+  .search-input::placeholder {
+    color: transparent;
+  }
+  .search-icon {
+    left: 9px !important;
+    top: 9px !important;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  .search-container:focus-within {
+    position: absolute;
+    left: 48px;
+    right: 12px;
+    width: auto !important;
+    z-index: 600;
+  }
+  .search-container:focus-within .search-input {
+    width: 100% !important;
+    padding: 0 12px 0 34px !important;
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--accent-primary) !important;
+    color: var(--text-primary) !important;
+    cursor: text;
+  }
+  .search-container:focus-within .search-input::placeholder {
+    color: var(--text-muted);
+  }
+  .layer-pills-wrapper {
+    flex: 1 1 auto;
+    min-width: 60px;
+    max-width: none;
+  }
+  .hud-view-toolbar {
+    top: 66px;
+    left: 8px;
+    right: 8px;
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
 }

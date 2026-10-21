@@ -6,7 +6,7 @@
   <title>SquirrelMap — 3D Idea Mindmap & Sourcing Graph</title>
   <meta name="description" content="An interactive 3D idea mindmap and maker project graph with local Markdown notes, cross-project BOM parts bulk-sourcing, and autonomous AI agents.">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="css/style.css?v=36">
+  <link rel="stylesheet" href="css/style.css?v=39">
 </head>
 <body class="theme-glass-dark">
 
@@ -19,7 +19,7 @@
   <header class="top-navbar">
     <div class="brand">
       <img src="favicon.png" alt="SquirrelMap" style="width: 28px; height: 28px; border-radius: 6px; box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);">
-      <h1 style="font-size: 1.18rem; font-weight: 800; margin: 0; background: linear-gradient(135deg, #f59e0b 20%, #38bdf8 80%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.02em;">SquirrelMap</h1>
+      <h1 class="brand-title" style="font-size: 1.18rem; font-weight: 800; margin: 0; background: linear-gradient(135deg, #f59e0b 20%, #38bdf8 80%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.02em; white-space: nowrap;">SquirrelMap</h1>
     </div>
 
     <!-- Search with dynamic auto-complete -->
@@ -41,7 +41,7 @@
     <!-- Navigation Actions -->
     <div class="nav-actions">
       <!-- Theme Switcher -->
-      <select id="themeSelect" class="form-select" style="height: 36px; padding: 4px 10px; font-size: 0.78rem;">
+      <select id="themeSelect" class="form-select nav-theme-select" style="height: 36px; padding: 4px 10px; font-size: 0.78rem;">
         <option value="theme-glass-dark">Glassmorphic Dark</option>
         <option value="theme-cyberpunk">Cyberpunk Neon</option>
         <option value="theme-celestial">Celestial Star Map</option>
@@ -50,33 +50,33 @@
       <!-- Multi-Select Mode Toggle Button -->
       <button id="btnToggleMultiSelect" class="btn-action" title="Toggle Multi-Select Mode to select multiple projects for Consolidated BOM or batch inspection">
         <span class="btn-icon">☑️</span>
-        <span id="multiSelectBtnLabel">Multi-Select</span>
+        <span id="multiSelectBtnLabel" class="btn-label">Multi-Select</span>
         <span id="multiSelectCountBadge" class="badge" style="display: none; background: #06b6d4; color: #0f172a; font-weight: 800;">0</span>
       </button>
 
       <!-- Consolidated BOM / Sourcing Modal Button -->
       <button id="btnOpenBomModal" class="btn-action" title="Consolidated Bill of Materials (BOM) & Bulk-Buy Recommendations">
         <span class="btn-icon">🛒</span>
-        <span id="bomNavBtnLabel">Consolidated BOM</span>
+        <span id="bomNavBtnLabel" class="btn-label">Consolidated BOM</span>
         <span id="sharedBomBadge" class="badge">0</span>
       </button>
 
       <!-- AI Brainstorm Modal Button -->
       <button id="btnOpenAiModal" class="btn-action btn-primary" title="AI Brainstorm & Stash Idea">
         <span class="btn-icon">💡</span>
-        Brainstorm Idea
+        <span class="btn-label">Brainstorm Idea</span>
       </button>
 
       <!-- Integrated Antigravity MCP Agent Chat Button -->
-      <button id="btnOpenMcpChat" class="btn-action" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25)); border-color: rgba(168, 85, 247, 0.45); color: #c084fc;" title="Open Integrated SquirrelMap MCP Agent Chat">
+      <button id="btnOpenMcpChat" class="btn-action btn-agent" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25)); border-color: rgba(168, 85, 247, 0.45); color: #c084fc;" title="Open Integrated SquirrelMap MCP Agent Chat">
         <span class="btn-icon">🤖</span>
-        SquirrelMap Agent
+        <span class="btn-label">SquirrelMap Agent</span>
       </button>
 
       <!-- New Project Button -->
       <button id="btnCreateNewIdea" class="btn-action" title="Create a New Project Idea">
         <span class="btn-icon">➕</span>
-        New Project
+        <span class="btn-label">New Project</span>
       </button>
 
       <!-- Full Mindmap Export -->
@@ -399,7 +399,7 @@
         <div style="display: flex; gap: 12px; margin-bottom: 12px;">
           <div class="form-row" style="flex: 1;">
             <label class="form-label">Suggested Category (optional)</label>
-            <input type="text" id="aiCategoryInput" class="form-input" placeholder="Leave blank for auto-categorization...">
+            <input type="text" id="aiCategoryInput" class="form-input" list="categoryDatalist" placeholder="Leave blank for AI auto-categorization, or type new/pick existing...">
           </div>
           <div class="form-row" style="width: 180px;">
             <label class="form-label">AI Model</label>
