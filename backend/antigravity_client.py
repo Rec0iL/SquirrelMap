@@ -6,6 +6,7 @@ import re
 from typing import Optional, Dict, Any, List
 
 from backend.database import DATA_DIR as _DB_DATA_DIR, IDEAS_DIR
+from backend.whisper_service import _get_clean_subprocess_env
 
 # DATA_DIR may be unset (dev mode); fall back to the ideas folder's parent
 DATA_DIR = _DB_DATA_DIR or os.path.dirname(IDEAS_DIR)

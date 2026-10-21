@@ -239,6 +239,16 @@ async def whisper_audio_endpoint(filename: str):
 
 @app.post("/api/mcp/chat")
 async def mcp_chat_endpoint(req: McpChatRequest):
+    try:
+        return await _mcp_chat_impl(req)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "response": "", "created_idea": None, "error": f"Internal error: {type(e).__name__}: {e}"}
+
+async def _mcp_chat_impl(req: McpChatRequest):
     message = (req.message or "").strip()
     if not message and not req.referenced_ideas:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
