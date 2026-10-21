@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SquirrelMap — 3D Idea Mindmap & Sourcing Graph</title>
+  <meta name="description" content="An interactive 3D idea mindmap and maker project graph with local Markdown notes, cross-project BOM parts bulk-sourcing, and autonomous AI agents.">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="css/style.css?v=36">
+</head>
+<body class="theme-glass-dark">
+
+  <!-- 3D WebGL Canvas Viewport -->
+  <div id="3d-graph"></div>
+
+  <datalist id="categoryDatalist"></datalist>
+
+  <!-- Top Glassmorphic Navigation Bar -->
+  <header class="top-navbar">
+    <div class="brand">
+      <img src="favicon.png" alt="SquirrelMap" style="width: 28px; height: 28px; border-radius: 6px; box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);">
+      <h1 style="font-size: 1.18rem; font-weight: 800; margin: 0; background: linear-gradient(135deg, #f59e0b 20%, #38bdf8 80%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.02em;">SquirrelMap</h1>
+    </div>
+
+    <!-- Search with dynamic auto-complete -->
+    <div class="search-container">
+      <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input type="text" id="searchInput" class="search-input" placeholder="Search stashed ideas, components, tags..." autocomplete="off">
+      <div id="searchResults" class="search-results"></div>
+    </div>
+
+    <!-- Category Pills Navigation -->
+    <div class="layer-pills-wrapper">
+      <button id="btnScrollPillsLeft" class="pills-scroll-btn hidden" title="Scroll categories left">‹</button>
+      <nav id="categoryPillsContainer" class="layer-pills" aria-label="Project Categories">
+        <button class="layer-btn active" data-category="all">All</button>
+      </nav>
+      <button id="btnScrollPillsRight" class="pills-scroll-btn hidden" title="Scroll categories right">›</button>
+    </div>
+
+    <!-- Navigation Actions -->
+    <div class="nav-actions">
+      <!-- Theme Switcher -->
+      <select id="themeSelect" class="form-select" style="height: 36px; padding: 4px 10px; font-size: 0.78rem;">
+        <option value="theme-glass-dark">Glassmorphic Dark</option>
+        <option value="theme-cyberpunk">Cyberpunk Neon</option>
+        <option value="theme-celestial">Celestial Star Map</option>
+      </select>
+
+      <!-- Multi-Select Mode Toggle Button -->
+      <button id="btnToggleMultiSelect" class="btn-action" title="Toggle Multi-Select Mode to select multiple projects for Consolidated BOM or batch inspection">
+        <span class="btn-icon">☑️</span>
+        <span id="multiSelectBtnLabel">Multi-Select</span>
+        <span id="multiSelectCountBadge" class="badge" style="display: none; background: #06b6d4; color: #0f172a; font-weight: 800;">0</span>
+      </button>
+
+      <!-- Consolidated BOM / Sourcing Modal Button -->
+      <button id="btnOpenBomModal" class="btn-action" title="Consolidated Bill of Materials (BOM) & Bulk-Buy Recommendations">
+        <span class="btn-icon">🛒</span>
+        <span id="bomNavBtnLabel">Consolidated BOM</span>
+        <span id="sharedBomBadge" class="badge">0</span>
+      </button>
+
+      <!-- AI Brainstorm Modal Button -->
+      <button id="btnOpenAiModal" class="btn-action btn-primary" title="AI Brainstorm & Stash Idea">
+        <span class="btn-icon">💡</span>
+        Brainstorm Idea
+      </button>
+
+      <!-- Integrated Antigravity MCP Agent Chat Button -->
+      <button id="btnOpenMcpChat" class="btn-action" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25)); border-color: rgba(168, 85, 247, 0.45); color: #c084fc;" title="Open Integrated SquirrelMap MCP Agent Chat">
+        <span class="btn-icon">🤖</span>
+        SquirrelMap Agent
+      </button>
+
+      <!-- New Project Button -->
+      <button id="btnCreateNewIdea" class="btn-action" title="Create a New Project Idea">
+        <span class="btn-icon">➕</span>
+        New Project
+      </button>
+
+      <!-- Full Mindmap Export -->
+      <button id="btnExportGraph" class="btn-icon" title="Export Mindmap Data">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Floating Visualization & Layout Modes Toolbar -->
+  <aside class="hud-view-toolbar" aria-label="Mindmap Visualization Modes">
+    <!-- Layout Mode Dropdown -->
+    <div class="hud-mode-pill">
+      <span class="hud-mode-icon">🌐</span>
+      <label class="hud-mode-label" for="layoutModeSelect">Layout:</label>
+      <select id="layoutModeSelect" class="hud-select" title="Switch 3D Graph Layout Mode">
+        <option value="galaxy" selected>🌌 3D Galaxy (Force)</option>
+        <option value="radial">☀️ Radial Burst (DAG)</option>
+        <option value="pyramid">🏛️ Hierarchy (DAG)</option>
+        <option value="inverted">🌲 Inverted Tree (DAG)</option>
+        <option value="2d">🗺️ 2D Mindmap (Plane)</option>
+      </select>
+    </div>
+
+    <!-- Node Sizing Dropdown -->
+    <div class="hud-mode-pill">
+      <span class="hud-mode-icon">🌟</span>
+      <label class="hud-mode-label" for="nodeSizeModeSelect">Size:</label>
+      <select id="nodeSizeModeSelect" class="hud-select" title="Switch Node Sizing Metric">
+        <option value="degree" selected>🌟 Connections (Degree)</option>
+        <option value="pagerank">🎯 Centrality (PageRank)</option>
+        <option value="bom">🛒 BOM Components Count</option>
+        <option value="uniform">⚪ Uniform Minimalist</option>
+      </select>
+    </div>
+
+    <!-- Coloring Mode Dropdown -->
+    <div class="hud-mode-pill">
+      <span class="hud-mode-icon">🎨</span>
+      <label class="hud-mode-label" for="nodeColorModeSelect">Color:</label>
+      <select id="nodeColorModeSelect" class="hud-select" title="Switch Node Coloring Mode">
+        <option value="category" selected>🌐 Project Category</option>
+        <option value="status">🚦 Development Status</option>
+        <option value="degree">🔥 Connection Density</option>
+        <option value="cascade">🌊 Multi-Hop Cascade</option>
+      </select>
+    </div>
+  </aside>
+
+  <!-- Floating HUD Viewport Controls -->
+  <aside class="hud-controls" aria-label="Camera and HUD Controls">
+    <div class="hud-panel">
+      <button id="btnResetCamera" class="btn-icon" title="Reset Camera View">
+        <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+      </button>
+      <button id="btnToggleAutoRotate" class="btn-icon" title="Toggle Auto-Rotation">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+      </button>
+      <button id="btnTakeSnapshot" class="btn-icon" title="Capture High-Res Mindmap Image (PNG)">
+        <svg viewBox="0 0 24 24"><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+      </button>
+      <button id="btnToggleHorizon" class="btn-icon" title="Toggle Horizon Isolation (Focus on Selected Network)">
+        <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- HUD Graph Counters -->
+  <div class="hud-stats" aria-label="SquirrelMap Statistics">
+    <span>Ideas: <strong id="statSkillsCount">0</strong></span>
+    <span>Connections: <strong id="statEdgesCount">0</strong></span>
+    <span>Shared BOM Links: <strong id="statSharedBomCount">0</strong></span>
+  </div>
+
+  <!-- Collapsible Idea Inspector & Markdown Editor Side Panel -->
+  <aside id="inspectorPanel" class="side-panel" aria-label="Idea Inspector">
+    <div class="panel-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <select id="inspStatusSelect" class="form-select" style="font-size: 0.74rem; height: 30px; padding: 2px 8px; font-weight: 600;">
+          <option value="concept">💡 Concept</option>
+          <option value="prototyping">🔬 Prototyping</option>
+          <option value="in-progress">🛠️ In Progress</option>
+          <option value="completed">🚀 Completed</option>
+          <option value="archived">📦 Archived</option>
+        </select>
+        <input type="text" id="inspCategoryInput" class="form-input" list="categoryDatalist" style="height: 30px; font-size: 0.74rem; padding: 2px 8px; width: 140px;" placeholder="Category...">
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="btnDeleteIdeaHeader" class="panel-close-btn" title="Delete Idea" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4); width: 30px; height: 30px;">
+          <svg style="width: 16px; height: 16px; fill: currentColor;" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </button>
+        <button id="btnCloseInspector" class="panel-close-btn" title="Close Panel" style="width: 30px; height: 30px;">
+          <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Inspector Tabs Header -->
+    <nav class="inspector-tab-nav" aria-label="Inspector Tabs">
+      <button class="insp-tab-btn active" data-tab="tabNotes">📝 Notes</button>
+      <button class="insp-tab-btn" data-tab="tabBom">🛒 BOM Parts</button>
+      <button class="insp-tab-btn" data-tab="tabConnections">🔗 Connections</button>
+      <button class="insp-tab-btn" data-tab="tabSimilarities">✨ Synergies</button>
+    </nav>
+
+    <div class="panel-body" style="padding-top: 10px;">
+      <!-- Multi-Selection Controls in Inspector -->
+      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <button id="btnToggleAddToSelection" class="btn-action btn-sm" style="flex: 1; justify-content: center;" title="Add or remove this project from your Multi-Selection">
+          <span class="btn-icon">➕</span> <span id="btnToggleAddToSelectionText">Add to Selection</span>
+        </button>
+        <button id="btnInspectorDeselectAll" class="btn-action btn-sm" style="color: #f87171; border-color: rgba(248, 113, 113, 0.3); display: none;" title="Deselect all selected projects">
+          Deselect All
+        </button>
+      </div>
+
+      <!-- Title & Tags Row -->
+      <input type="text" id="inspTitleInput" class="form-input" style="font-size: 1.05rem; font-weight: 700; margin-bottom: 6px;" placeholder="Project Title...">
+      <input type="text" id="inspTagsInput" class="form-input" style="font-size: 0.78rem; margin-bottom: 10px;" placeholder="Tags (comma-separated, e.g. esp32, 3d-printing)...">
+
+      <!-- ================= TAB 1: MARKDOWN NOTES ================= -->
+      <div id="tabNotes" class="insp-tab-pane active">
+        <div class="md-editor-container">
+          <!-- Markdown Toolbar -->
+          <div class="md-toolbar">
+            <button class="md-tool-btn" data-insert="**" data-close="**" title="Bold"><b>B</b></button>
+            <button class="md-tool-btn" data-insert="*" data-close="*" title="Italic"><i>I</i></button>
+            <button class="md-tool-btn" data-insert="`" data-close="`" title="Inline Code"><code>&lt;&gt;</code></button>
+            <button class="md-tool-btn" data-insert="## " title="Heading 2">H2</button>
+            <button class="md-tool-btn" data-insert="### " title="Heading 3">H3</button>
+            <button class="md-tool-btn" data-insert="- " title="Bullet List">• List</button>
+            <button class="md-tool-btn" data-insert="- [ ] " title="Task Checkbox">☑ Task</button>
+
+            <div class="md-view-switch">
+              <button id="btnMdEditMode" class="md-view-btn active">Edit</button>
+              <button id="btnMdPreviewMode" class="md-view-btn">Preview</button>
+            </div>
+          </div>
+
+          <!-- Markdown Textarea -->
+          <textarea id="inspMarkdownTextarea" class="md-textarea" placeholder="Write full markdown notes, technical specs, pinouts, and design goals..."></textarea>
+
+          <!-- Markdown Live Preview -->
+          <div id="inspMarkdownPreview" class="md-preview-box" style="display: none;"></div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span id="markdownSaveStatus" style="font-size: 0.74rem; color: var(--text-muted);">Saved locally to markdown</span>
+            <button id="btnSaveMarkdownNotes" class="btn-action btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.78rem;">Save Notes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= TAB 2: BILL OF MATERIALS (BOM) ================= -->
+      <div id="tabBom" class="insp-tab-pane">
+        <div class="bom-section">
+          <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px;">
+            Components needed for this project. Shared parts are highlighted for bulk purchasing.
+          </div>
+
+          <!-- Add BOM Item Form -->
+          <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+            <input type="text" id="newBomItemName" class="form-input" style="flex: 2; font-size: 0.76rem;" placeholder="Part name (e.g. RP2040-Zero)...">
+            <input type="number" id="newBomItemQty" class="form-input" style="width: 55px; font-size: 0.76rem;" value="1" min="1">
+            <button id="btnAddBomItem" class="btn-action" style="padding: 0 10px; font-size: 0.76rem;">+ Add</button>
+          </div>
+          <input type="text" id="newBomItemNotes" class="form-input" style="font-size: 0.74rem; margin-bottom: 12px;" placeholder="Optional part notes / supplier link...">
+
+          <!-- BOM Items List -->
+          <div id="inspBomList" style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 0.78rem; color: var(--text-muted);">No components added yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= TAB 3: CONNECTIONS & SHARED PARTS ================= -->
+      <div id="tabConnections" class="insp-tab-pane">
+        <!-- Outgoing & Incoming Connections Lists -->
+        <div class="section-title">Connected Projects</div>
+        <div id="inspOutgoingList" class="conn-list" style="margin-bottom: 12px;">
+          <div style="font-size: 0.78rem; color: var(--text-muted);">No connections yet</div>
+        </div>
+
+        <!-- Multi-Hop Cascade Influence & Ripple Tree -->
+        <div class="cascade-section" style="margin-top: 14px; margin-bottom: 14px; border-top: 1px solid var(--border-glass); padding-top: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-weight: 700; font-size: 0.82rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+              <span>🌊</span> Multi-Hop Cascade Influence
+            </span>
+            <span id="cascadeHopsSummary" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.68rem; padding: 2px 8px; border-radius: 9999px;">0 Ripples</span>
+          </div>
+          <div id="inspCascadeContainer" class="cascade-tree-container">
+            <div style="font-size: 0.78rem; color: var(--text-muted);">Select a project to inspect its multi-hop cascade ripple.</div>
+          </div>
+        </div>
+
+        <!-- Connection Linker Card -->
+        <div class="create-link-card">
+          <div class="section-title" style="margin-bottom: 6px;">Link to Another Project</div>
+
+          <div class="form-row target-picker-wrapper">
+            <label class="form-label">Target Project</label>
+            <input type="text" id="targetSkillSearchInput" class="form-input" placeholder="Search project to link with..." autocomplete="off">
+            <div id="targetSearchResults" class="target-search-results"></div>
+            <div id="selectedTargetContainer" style="display: none; margin-top: 6px;"></div>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <div class="form-row" style="flex: 1;">
+              <label class="form-label">Relationship</label>
+              <select id="linkRelationTypeSelect" class="form-select">
+                <option value="shared_bom">⚡ Shared BOM Parts (Bulk-Buy)</option>
+                <option value="synergy">✨ Synergy & Integration</option>
+                <option value="depends_on">🔗 Depends On / Prerequisite</option>
+                <option value="subproject">📂 Sub-Project Module</option>
+                <option value="related">💡 Related Concept</option>
+              </select>
+            </div>
+            <div class="form-row" style="align-self: flex-end;">
+              <button id="btnAiProposeLink" class="btn-action" style="height: 36px; padding: 0 10px; font-size: 0.75rem;" title="AI Propose Connection Rationale">
+                ✨ AI Propose
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label class="form-label">Connection Notes / Shared Hardware</label>
+            <input type="text" id="linkDescriptionInput" class="form-input" placeholder="e.g. Both use 12V Noctua fan and barrel jacks...">
+          </div>
+
+          <button id="btnEstablishLink" class="btn-action btn-primary" style="width: 100%; justify-content: center;" disabled>
+            Establish Connection
+          </button>
+        </div>
+      </div>
+
+      <!-- ================= TAB 4: AI SIMILARITIES ================= -->
+      <div id="tabSimilarities" class="insp-tab-pane">
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px;">
+          Similar projects detected by shared components, common tags, and category synergy:
+        </div>
+        <div id="inspSimilaritiesList">
+          <div style="font-size: 0.78rem; color: var(--text-muted);">Analyzing similarities...</div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px;">
+        <button id="btnSaveAllChanges" class="btn-action btn-primary" style="width: 100%; justify-content: center;">Save All Changes to Markdown</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnFocusNode" class="btn-action" style="flex: 1; justify-content: center;">Focus Camera</button>
+          <button id="btnDeleteIdea" class="btn-action" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4); justify-content: center;">Delete</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Consolidated Bill of Materials (BOM) Sourcing Modal -->
+  <div id="bomModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-window" style="max-width: 850px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">🛒</span>
+          <div>
+            <h2 id="bomModalTitle" class="modal-title">SquirrelMap Consolidated BOM</h2>
+            <div id="bomModalSubtitle" style="font-size: 0.75rem; color: var(--text-muted);">Aggregated hardware and components across stashed projects for bulk purchasing.</div>
+            <div id="bomScopeSelector" style="display: flex; gap: 6px; margin-top: 6px;">
+              <button id="btnBomScopeSelected" class="btn-action btn-sm" style="font-size: 0.72rem; padding: 2px 8px; display: none;">
+                🎯 Selected Projects (<span id="bomSelectedCountBadge">0</span>)
+              </button>
+              <button id="btnBomScopeAll" class="btn-action btn-sm active-cyan" style="font-size: 0.72rem; padding: 2px 8px;">
+                🌐 All Projects
+              </button>
+            </div>
+          </div>
+        </div>
+        <button id="btnCloseBomModal" class="panel-close-btn">
+          <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <!-- Summary Stats Banner -->
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div style="flex: 1; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px 14px;">
+            <div style="font-size: 0.74rem; color: #34d399; font-weight: 700; text-transform: uppercase;">Bulk-Buy Opportunities</div>
+            <div id="bomSharedCount" style="font-size: 1.4rem; font-weight: 800; color: #f8fafc;">0 Parts</div>
+          </div>
+          <div style="flex: 1; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 10px 14px;">
+            <div style="font-size: 0.74rem; color: #38bdf8; font-weight: 700; text-transform: uppercase;">Total Unique Parts</div>
+            <div id="bomTotalCount" style="font-size: 1.4rem; font-weight: 800; color: #f8fafc;">0 Items</div>
+          </div>
+        </div>
+
+        <!-- Recommendations Section -->
+        <div id="bomRecommendationsContainer" style="margin-bottom: 16px;"></div>
+
+        <!-- Parts Grid -->
+        <div class="section-title">All Stashed Components</div>
+        <div id="bomGridContainer" class="bulk-buy-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive AI Brainstorm Modal -->
+  <div id="aiModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h2 class="modal-title">🐿️ SquirrelMap Idea Brainstorm & Auto-Categorizer</h2>
+        <button id="btnCloseAiModal" class="panel-close-btn">
+          <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-row" style="margin-bottom: 12px;">
+          <label class="form-label">What idea do you want to stash? (Rough Goal / Concept)</label>
+          <textarea id="aiTopicInput" class="form-textarea" rows="3" placeholder="e.g. A motorized solder wire feeder with a foot pedal that leaves both hands free..."></textarea>
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+          <div class="form-row" style="flex: 1;">
+            <label class="form-label">Suggested Category (optional)</label>
+            <input type="text" id="aiCategoryInput" class="form-input" placeholder="Leave blank for auto-categorization...">
+          </div>
+          <div class="form-row" style="width: 180px;">
+            <label class="form-label">AI Model</label>
+            <select id="aiModelSelect" class="form-select">
+              <option value="gemini-3.8-flash-low">Gemini 3.8 Flash (Low)</option>
+              <option value="gemini-3.8-flash-high">Gemini 3.8 Flash (High)</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="btnTriggerAiGenerate" class="btn-action btn-primary" style="align-self: flex-start;">✨ Brainstorm, Categorize & Stash in Mindmap</button>
+
+        <!-- Preview Section -->
+        <div id="diffPreviewSection" style="display: none; border-top: 1px solid var(--glass-border); padding-top: 16px; margin-top: 14px;">
+          <div id="brainstormPreviewCard" class="bulk-buy-card" style="border-color: rgba(56, 189, 248, 0.4);"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <span style="font-size: 0.76rem; color: var(--text-muted);">Saves directly to a standalone local Markdown file in <code>ideas/</code></span>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnCancelAiModal" class="btn-action">Cancel</button>
+          <button id="btnCommitMerge" class="btn-action btn-primary" disabled>Accept & View in 3D Mindmap</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- Create New Project / Idea Modal -->
+  <div id="newIdeaModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-window" style="max-width: 500px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">➕</span>
+          <h2 class="modal-title">Create New Project</h2>
+        </div>
+        <button id="btnCloseNewIdeaModal" class="panel-close-btn" title="Close">
+          <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding: 16px 20px;">
+        <div class="form-row" style="margin-bottom: 12px;">
+          <label class="form-label" for="newIdeaTitleInput">Project Title</label>
+          <input type="text" id="newIdeaTitleInput" class="form-input" placeholder="e.g. Motorized Camera Slider, Smart Soldering Stand...">
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+          <div style="flex: 1;">
+            <label class="form-label" for="newIdeaCategoryInput">Category</label>
+            <input type="text" id="newIdeaCategoryInput" class="form-input" list="categoryDatalist" placeholder="Select or type new category...">
+          </div>
+          <div style="width: 140px;">
+            <label class="form-label" for="newIdeaStatusSelect">Initial Status</label>
+            <select id="newIdeaStatusSelect" class="form-select">
+              <option value="concept">💡 Concept</option>
+              <option value="prototyping">🔬 Prototyping</option>
+              <option value="in-progress">🛠️ In Progress</option>
+              <option value="completed">🚀 Completed</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-bottom: 12px;">
+          <label class="form-label" for="newIdeaDescInput">Short Overview / Goal</label>
+          <textarea id="newIdeaDescInput" class="form-textarea" rows="2" placeholder="Brief summary of what this project aims to accomplish..."></textarea>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="newIdeaTagsInput">Tags (comma-separated)</label>
+          <input type="text" id="newIdeaTagsInput" class="form-input" placeholder="e.g. esp32, 3d-printing, stepper-motor">
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 12px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button id="btnCancelNewIdeaModal" class="btn-action">Cancel</button>
+        <button id="btnSubmitNewIdeaModal" class="btn-action btn-primary">Create Project</button>
+      </div>
+    </div>
+  </div>
+
+<!-- Confirmation / Action Danger Modal -->
+  <div id="confirmModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-window" style="max-width: 440px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">⚠️</span>
+          <h2 id="confirmModalTitle" class="modal-title">Delete Idea?</h2>
+        </div>
+        <button id="btnCloseConfirmModal" class="panel-close-btn" title="Cancel">
+          <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding: 16px 20px;">
+        <p id="confirmModalMessage" style="font-size: 0.88rem; color: #e2e8f0; line-height: 1.5; margin: 0 0 14px 0;">
+          Are you sure you want to delete this idea?
+        </p>
+        <div style="font-size: 0.74rem; color: #fca5a5; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 10px 12px; line-height: 1.4;">
+          <strong>Permanent Action:</strong> This permanently deletes the Markdown file on disk and severs all connected links.
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 12px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button id="btnCancelConfirmModal" class="btn-action">Cancel</button>
+        <button id="btnAcceptConfirmModal" class="btn-action" style="background: #ef4444; border-color: #ef4444; color: #fff; font-weight: 600;">Delete Idea</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Integrated Antigravity MCP Agent Chat Drawer -->
+  <aside id="mcpChatDrawer" class="chat-drawer" aria-label="SquirrelMap MCP Agent Chat">
+    <div id="chatResizeHandle" class="chat-resize-handle" title="Drag to resize chat window"></div>
+
+    <div class="chat-header">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <img src="favicon.png" alt="SquirrelMap" style="width: 26px; height: 26px; border-radius: 6px;">
+        <div>
+          <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);">SquirrelMap Agent</div>
+          <div class="chat-status"><span class="status-dot"></span> Live Curation & Bulk BOM Sourcing (10 Tools Active)</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <button id="btnOpenChatSettings" class="panel-icon-btn" title="Agent & AI Provider Settings (AGY, Claude, Codex, Ollama, OpenCode, Custom)">
+          <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        </button>
+        <button id="btnExpandMcpChat" class="panel-icon-btn" title="Toggle Expanded View">
+          <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+        </button>
+        <button id="btnClearMcpChat" class="panel-icon-btn" title="Clear Conversation">
+          <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </button>
+        <button id="btnCloseMcpChat" class="panel-close-btn" title="Close Chat">
+          <svg style="width: 16px; height: 16px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Chat Agent Settings Panel (Collapsible Overlay) -->
+    <div id="chatSettingsPanel" class="chat-settings-panel" style="display: none;">
+      <div class="chat-settings-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>⚙️</span>
+          <strong>AI Agent & Provider Settings</strong>
+        </div>
+        <button id="btnCloseChatSettings" class="panel-close-btn" style="width: 26px; height: 26px;">
+          <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="chat-settings-body">
+        <div class="form-row">
+          <label class="form-label" for="agentProviderSelect">AI Agent Provider</label>
+          <select id="agentProviderSelect" class="form-select">
+            <option value="agy">🤖 Google Antigravity (AGY)</option>
+            <option value="claude">🧠 Anthropic Claude (Claude Code CLI)</option>
+            <option value="codex">⚡ OpenAI Codex / GPT</option>
+            <option value="ollama">🦙 Local Ollama</option>
+            <option value="opencode">💻 OpenCode</option>
+            <option value="custom">✨ Custom Agent</option>
+          </select>
+        </div>
+
+        <!-- AGY Settings -->
+        <div id="settingsSectionAgy" class="agent-config-section">
+          <label class="form-label" for="agyModelSelect">Antigravity Model</label>
+          <select id="agyModelSelect" class="form-select">
+            <option value="gemini-3.8-flash-low">Gemini 3.8 Flash (Low) — Fast & Free</option>
+            <option value="gemini-3.8-flash-high">Gemini 3.8 Flash (High Reasoning)</option>
+            <option value="gemini-3.1-pro-high">Gemini 3.1 Pro (High Reasoning)</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+          </select>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">Runs via local Antigravity CLI without requiring external API keys.</div>
+        </div>
+
+        <!-- Claude Settings -->
+        <div id="settingsSectionClaude" class="agent-config-section" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label class="form-label" for="claudeModelSelect" style="margin-bottom: 0;">Claude Model</label>
+            <span id="claudeCliStatusBadge" style="font-size: 0.7rem; color: #10b981; font-weight: 600;">Detecting CLI...</span>
+          </div>
+          <select id="claudeModelSelect" class="form-select">
+            <option value="sonnet" selected>Claude Sonnet (Recommended)</option>
+            <option value="haiku">Claude Haiku (Fast & Lightweight)</option>
+            <option value="opus">Claude Opus (Deep Reasoning)</option>
+          </select>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">Uses system Claude Code CLI (<code>~/.local/bin/claude</code>).</div>
+        </div>
+
+        <!-- Codex / OpenAI Settings -->
+        <div id="settingsSectionCodex" class="agent-config-section" style="display: none;">
+          <label class="form-label" for="codexModelInput">Codex / GPT Model</label>
+          <input type="text" id="codexModelInput" class="form-input" value="gpt-4o" placeholder="gpt-4o, o1-mini">
+          <label class="form-label" for="codexApiKeyInput" style="margin-top: 6px;">OpenAI API Key</label>
+          <input type="password" id="codexApiKeyInput" class="form-input" placeholder="sk-...">
+          <label class="form-label" for="codexBaseUrlInput" style="margin-top: 6px;">API Endpoint</label>
+          <input type="text" id="codexBaseUrlInput" class="form-input" value="https://api.openai.com/v1/chat/completions">
+        </div>
+
+        <!-- Ollama Settings -->
+        <div id="settingsSectionOllama" class="agent-config-section" style="display: none;">
+          <label class="form-label" for="ollamaModelSelect">Local Ollama Model</label>
+          <select id="ollamaModelSelect" class="form-select">
+            <option value="llama3.1:8b">llama3.1:8b</option>
+            <option value="gemma4:12b">gemma4:12b</option>
+            <option value="qwen3:latest">qwen3:latest</option>
+            <option value="qwen3.6:latest">qwen3.6:latest</option>
+            <option value="qwen2.5-coder:1.5b-base">qwen2.5-coder:1.5b-base</option>
+          </select>
+          <label class="form-label" for="ollamaEndpointInput" style="margin-top: 6px;">Ollama Endpoint URL</label>
+          <input type="text" id="ollamaEndpointInput" class="form-input" value="http://localhost:11434/api/chat">
+          <div style="font-size: 0.72rem; color: #34d399; margin-top: 4px;">⚡ Local inference active on port 11434</div>
+        </div>
+
+        <!-- OpenCode Settings -->
+        <div id="settingsSectionOpenCode" class="agent-config-section" style="display: none;">
+          <label class="form-label" for="openCodeModelInput">OpenCode Model</label>
+          <input type="text" id="openCodeModelInput" class="form-input" value="default" placeholder="e.g. default">
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">Runs via local OpenCode CLI (<code>~/.opencode/bin/opencode</code>).</div>
+        </div>
+
+        <!-- Custom Agent Settings -->
+        <div id="settingsSectionCustom" class="agent-config-section" style="display: none;">
+          <label class="form-label" for="customAgentNameInput">Agent Name</label>
+          <input type="text" id="customAgentNameInput" class="form-input" value="Custom Agent" placeholder="e.g. My Workshop Agent">
+          <label class="form-label" for="customEndpointInput" style="margin-top: 6px;">Endpoint URL (OpenAI-compatible)</label>
+          <input type="text" id="customEndpointInput" class="form-input" placeholder="http://localhost:8000/v1/chat/completions">
+          <label class="form-label" for="customApiKeyInput" style="margin-top: 6px;">API Key (if required)</label>
+          <input type="password" id="customApiKeyInput" class="form-input" placeholder="Bearer token / api key">
+          <label class="form-label" for="customModelInput" style="margin-top: 6px;">Model Identifier</label>
+          <input type="text" id="customModelInput" class="form-input" placeholder="e.g. custom-model">
+        </div>
+
+        <button id="btnSaveAgentSettings" class="btn-action btn-primary" style="width: 100%; justify-content: center; margin-top: 14px;">
+          Save & Apply Agent
+        </button>
+      </div>
+    </div>
+
+    <div class="chat-model-toolbar">
+      <span class="chat-model-label">Active Agent:</span>
+      <div id="activeAgentBadge" class="active-agent-badge" title="Click to open Agent Settings">
+        <span id="activeAgentIcon">🤖</span>
+        <span id="activeAgentLabel">AGY: Gemini 3.8 Flash</span>
+        <span style="font-size: 0.65rem; color: var(--text-muted);">⚙️</span>
+      </div>
+    </div>
+
+    <!-- Quick Prompts Bar -->
+    <div class="chat-quick-prompts">
+      <button class="quick-prompt-chip" data-prompt="Analyze all BOM parts and give me recommendations for bulk purchasing components.">🛒 Analyze BOM</button>
+      <button class="quick-prompt-chip" data-prompt="Find unlinked or isolated projects and suggest connections based on shared hardware.">🔗 Connect Projects</button>
+      <button class="quick-prompt-chip" data-prompt="I have an idea: Smart soldering iron stand with auto-sleep sensor and brass sponge. Stash it and link it.">💡 Stash Iron Stand</button>
+      <button class="quick-prompt-chip" data-prompt="Give me a full summary of all categories and cross-project hardware synergies.">📊 SquirrelMap Diagnostic</button>
+    </div>
+
+    <div id="mcpChatMessages" class="chat-messages-container"></div>
+
+    <div class="chat-input-area">
+      <!-- Mention Autocomplete Popup -->
+      <div id="chatMentionPopup" class="chat-mention-popup" style="display: none;">
+        <div class="mention-popup-header">
+          <span>🔍 Reference Project as Context (Enter/Click to add)</span>
+        </div>
+        <div id="chatMentionList" class="mention-popup-list"></div>
+      </div>
+
+      <!-- Unified Chat Input Box: Cards live directly INLINE within the written text flow -->
+      <div class="chat-unified-input-box" id="chatUnifiedInputBox">
+        <div class="chat-inner-input-row">
+          <div id="mcpChatInput" class="chat-editable-input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Type a message or '@' to reference a project node..."></div>
+          <button id="btnSendMcpChat" class="btn-chat-send" title="Send (Enter)">
+            <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Floating Multi-Select Action Bar -->
+  <aside id="multiSelectActionBar" class="multi-select-hud-bar" style="display: none;" aria-label="Multi-Selection Controls">
+    <div class="multi-select-hud-info">
+      <span class="multi-select-hud-badge">☑️ Multi-Select</span>
+      <span id="multiSelectHudCount" class="multi-select-hud-count">0 projects selected</span>
+    </div>
+    <div class="multi-select-hud-actions">
+      <button id="btnViewSelectedBom" class="btn-action btn-primary btn-sm" title="View Consolidated BOM for only selected projects">
+        <span class="btn-icon">🛒</span> View Consolidated BOM (<span id="btnViewSelectedBomCount">0</span>)
+      </button>
+      <button id="btnDeselectAllNodes" class="btn-action btn-sm" title="Undo / Clear all selections">
+        <span class="btn-icon">❌</span> Deselect All
+      </button>
+      <button id="btnExitMultiSelect" class="btn-action btn-sm" title="Exit Multi-Select Mode">
+        Exit Mode
+      </button>
+    </div>
+  </aside>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- Scripts -->
+  <script src="vendor/3d-force-graph.min.js"></script>
+  <script src="vendor/marked.min.js"></script>
+  <script src="js/graph3d.js?v=36"></script>
+  <script src="js/ai_modal.js?v=36"></script>
+  <script src="js/chat.js?v=36"></script>
+  <script src="js/app.js?v=36"></script>
+</body>
+</html>

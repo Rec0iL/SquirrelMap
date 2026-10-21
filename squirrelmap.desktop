@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SquirrelMap
+GenericName=3D Idea Mindmap & Sourcing Graph
+Comment=Stash creative ideas, 3D project mindmap, local Markdown notes, and BOM bulk-sourcing
+Exec=/home/rec0il/Dokumente/Scritps/SquirrelMap/launch.sh
+Icon=squirrelmap
+Terminal=false
+Categories=Development;ProjectManagement;
+Keywords=squirrel;mindmap;ideas;stash;projects;bom;hardware;electronics;notes;
+StartupNotify=true
+StartupWMClass=tray_launcher.py

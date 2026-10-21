@@ -1,0 +1,87 @@
+{
+  "name": "squirrelmap",
+  "version": "1.0.0",
+  "description": "3D Idea Mindmap & Sourcing Graph",
+  "main": "electron/main.js",
+  "author": "Rec0iL",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux deb rpm AppImage",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg zip"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.rec0il.squirrelmap",
+    "productName": "SquirrelMap",
+    "copyright": "Copyright © 2026 Rec0iL",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-backend",
+        "to": "backend-bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "ideas",
+        "to": "ideas-default",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "rpm",
+        "AppImage"
+      ],
+      "category": "Utility",
+      "icon": "assets/icon.png",
+      "maintainer": "Rec0iL"
+    },
+    "deb": {
+      "packageCategory": "utils",
+      "priority": "optional"
+    },
+    "rpm": {
+      "category": "Applications/Productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SquirrelMap"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png"
+    }
+  }
+}
