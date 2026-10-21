@@ -1,3 +1,13 @@
+/** Parse a fetch response as JSON; on non-JSON/HTTP errors return a {success:false,error} object instead of throwing. */
+async function safeJson(resp) {
+  const text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return { success: false, error: `Server error (HTTP ${resp.status}): ${text.slice(0, 200) || resp.statusText}` };
+  }
+}
+
 /**
  * chat.js - Integrated Multi-Agent Chat Interface for SquirrelMap
  * Supports switching between Antigravity (AGY), Claude, Codex, Ollama, OpenCode, and Custom Agents.
@@ -956,7 +966,7 @@ class McpChatManager {
         })
       });
 
-      const data = await resp.json();
+      const data = await safeJson(resp);
       loadingElem.remove();
 
       if (data.success && data.response) {
@@ -1117,7 +1127,7 @@ class McpChatManager {
         })
       });
 
-      const data = await resp.json();
+      const data = await safeJson(resp);
       loadingElem.remove();
 
       if (data.success && data.response) {
@@ -1187,7 +1197,7 @@ class McpChatManager {
         })
       });
 
-      const data = await resp.json();
+      const data = await safeJson(resp);
       loadingElem.remove();
 
       if (data.success && data.response) {
@@ -1540,7 +1550,7 @@ class McpChatManager {
         })
       });
 
-      const chatData = await chatResp.json();
+      const chatData = await safeJson(chatResp);
       aiLoadingElem.remove();
 
       if (chatData.success && chatData.response) {

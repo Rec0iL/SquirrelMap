@@ -5,6 +5,11 @@ import shutil
 import re
 from typing import Optional, Dict, Any, List
 
+from backend.database import DATA_DIR as _DB_DATA_DIR, IDEAS_DIR
+
+# DATA_DIR may be unset (dev mode); fall back to the ideas folder's parent
+DATA_DIR = _DB_DATA_DIR or os.path.dirname(IDEAS_DIR)
+
 VALID_AGY_MODELS = [
     "gemini-3.8-flash-low",
     "gemini-3.8-flash-medium",
