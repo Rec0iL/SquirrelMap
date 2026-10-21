@@ -677,8 +677,24 @@
 
       <!-- Unified Chat Input Box: Cards live directly INLINE within the written text flow -->
       <div class="chat-unified-input-box" id="chatUnifiedInputBox">
-        <div class="chat-inner-input-row">
-          <div id="mcpChatInput" class="chat-editable-input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Type a message or '@' to reference a project node..."></div>
+        <!-- Live Voice Recording HUD (active during recording) -->
+        <div id="voiceRecordingHud" class="voice-recording-hud" style="display: none;">
+          <div class="voice-hud-indicator">
+            <span class="recording-pulse-dot"></span>
+            <span class="recording-label">Recording Voice Idea...</span>
+            <span id="voiceDurationCounter" class="recording-timer">00:00</span>
+          </div>
+          <div class="voice-hud-actions">
+            <button id="btnCancelVoice" class="voice-hud-btn btn-cancel" title="Discard recording">✕ Cancel</button>
+            <button id="btnStopVoice" class="voice-hud-btn btn-stop" title="Stop & Transcribe with Whisper">⏹️ Stop & Send</button>
+          </div>
+        </div>
+
+        <div class="chat-inner-input-row" id="chatInputRow">
+          <div id="mcpChatInput" class="chat-editable-input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Type a message, speak voice idea, or '@' to tag projects..."></div>
+          <button id="btnVoiceRecord" class="btn-chat-mic" title="Record voice project description with Whisper AI">
+            <svg style="width: 17px; height: 17px; fill: currentColor;" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+          </button>
           <button id="btnSendMcpChat" class="btn-chat-send" title="Send (Enter)">
             <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>

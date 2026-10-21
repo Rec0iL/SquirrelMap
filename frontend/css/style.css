@@ -2997,3 +2997,215 @@ body {
   border-radius: 4px;
   margin-bottom: 4px;
 }
+
+
+/* Voice Recording & Whisper Transcription UI */
+.btn-chat-mic {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  margin-right: 4px;
+}
+
+.btn-chat-mic:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.btn-chat-mic.recording {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #ef4444;
+  animation: micPulse 1.5s infinite;
+}
+
+@keyframes micPulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.voice-recording-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(249, 115, 22, 0.1));
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+.voice-hud-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recording-pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+  animation: pulseDot 1s infinite alternate;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.15); opacity: 1; }
+}
+
+.recording-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fca5a5;
+}
+
+.recording-timer {
+  font-family: "JetBrains Mono", monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.voice-hud-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-hud-btn {
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.voice-hud-btn.btn-cancel {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.voice-hud-btn.btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.voice-hud-btn.btn-stop {
+  background: linear-gradient(135deg, #ef4444, #f97316);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+}
+
+.voice-hud-btn.btn-stop:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* Chat Voice Bubble */
+.chat-voice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.chat-voice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-voice-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.chat-voice-whisper-tag {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace, monospace;
+}
+
+.chat-voice-player {
+  width: 100%;
+  height: 36px;
+  border-radius: 8px;
+  outline: none;
+  filter: invert(0.9) hue-rotate(180deg);
+}
+
+/* Expandable Whisper Transcript Section */
+.whisper-transcript-accordion {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.whisper-transcript-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.whisper-transcript-summary:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.whisper-toggle-hint {
+  font-size: 0.7rem;
+  color: var(--accent-primary);
+}
+
+.whisper-transcript-accordion[open] .whisper-toggle-hint {
+  color: var(--text-muted);
+}
+
+.whisper-transcript-content {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.15);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

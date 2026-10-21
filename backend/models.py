@@ -101,3 +101,5 @@ class McpChatRequest(BaseModel):
     referenced_ideas: Optional[List[Dict[str, Any]]] = None
     endpoint_url: Optional[str] = None
     api_key: Optional[str] = None
+    is_voice: Optional[bool] = False
+    voice_metadata: Optional[Dict[str, Any]] = None

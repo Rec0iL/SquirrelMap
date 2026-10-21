@@ -19,6 +19,22 @@ class McpChatManager {
     this.btnSend = document.getElementById('btnSendMcpChat');
     this.unifiedInputBox = document.getElementById('chatUnifiedInputBox');
 
+    // Voice & Whisper Recording Elements
+    this.btnVoiceRecord = document.getElementById('btnVoiceRecord');
+    this.voiceRecordingHud = document.getElementById('voiceRecordingHud');
+    this.voiceDurationCounter = document.getElementById('voiceDurationCounter');
+    this.btnCancelVoice = document.getElementById('btnCancelVoice');
+    this.btnStopVoice = document.getElementById('btnStopVoice');
+    this.chatInputRow = document.getElementById('chatInputRow');
+
+    this.mediaRecorder = null;
+    this.audioStream = null;
+    this.audioChunks = [];
+    this.voiceTimer = null;
+    this.voiceSeconds = 0;
+    this.isRecordingVoice = false;
+    this.recordingMimeType = '';
+
     // @-Mention Autocomplete Popup
     this.mentionPopup = document.getElementById('chatMentionPopup');
     this.mentionList = document.getElementById('chatMentionList');
@@ -85,6 +101,23 @@ class McpChatManager {
     if (this.btnClear) this.btnClear.addEventListener('click', () => this.clearChat());
     if (this.btnExpand) this.btnExpand.addEventListener('click', () => this.toggleExpand());
     if (this.btnSend) this.btnSend.addEventListener('click', () => this.sendMessage());
+
+    // Voice Recording Events
+    if (this.btnVoiceRecord) {
+      this.btnVoiceRecord.addEventListener('click', () => {
+        if (!this.isRecordingVoice) {
+          this.startVoiceRecording();
+        } else {
+          this.stopVoiceRecording(true);
+        }
+      });
+    }
+    if (this.btnStopVoice) {
+      this.btnStopVoice.addEventListener('click', () => this.stopVoiceRecording(true));
+    }
+    if (this.btnCancelVoice) {
+      this.btnCancelVoice.addEventListener('click', () => this.stopVoiceRecording(false));
+    }
 
     // Settings Menu Events
     if (this.btnOpenSettings) {
@@ -827,17 +860,18 @@ class McpChatManager {
     return msgDiv;
   }
 
-  appendLoadingIndicator() {
+  appendLoadingIndicator(customText = null) {
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'chat-message assistant chat-loading';
     const icon = this.activeAgentIcon ? this.activeAgentIcon.textContent : '🤖';
     const providerName = (this.agentConfig.provider || 'AI').toUpperCase();
+    const statusText = customText || `${providerName} is thinking & analyzing context...`;
 
     loadingDiv.innerHTML = `
       <div class="chat-message-avatar">${icon}</div>
       <div class="chat-bubble" style="display: flex; align-items: center; gap: 8px;">
         <span class="chat-spinner"></span>
-        <span style="font-size: 0.8rem; color: var(--text-muted);">${providerName} is thinking & analyzing context...</span>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">${statusText}</span>
       </div>
     `;
     this.messagesContainer.appendChild(loadingDiv);
@@ -1205,6 +1239,346 @@ class McpChatManager {
     this.adjustInputHeight();
     this.input.focus();
   }
+
+  // =========================================================================
+  // VOICE RECORDING & WHISPER TRANSCRIPTION PIPELINE
+  // =========================================================================
+
+  async startVoiceRecording() {
+    if (this.isBusy || this.isRecordingVoice) return;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (this.app && this.app.showToast) {
+        this.app.showToast("Audio recording is not supported in this browser/environment.", "error");
+      } else {
+        alert("Audio recording is not supported in this browser.");
+      }
+      return;
+    }
+
+    try {
+      this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      console.error("Microphone access error:", err);
+      if (this.app && this.app.showToast) {
+        this.app.showToast("Microphone access denied. Please enable microphone permissions.", "error");
+      } else {
+        alert("Microphone access denied.");
+      }
+      return;
+    }
+
+    // Select supported audio MIME type
+    let mimeType = "audio/webm;codecs=opus";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      if (MediaRecorder.isTypeSupported("audio/webm")) {
+        mimeType = "audio/webm";
+      } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+        mimeType = "audio/ogg;codecs=opus";
+      } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+        mimeType = "audio/mp4";
+      } else {
+        mimeType = "";
+      }
+    }
+
+    this.recordingMimeType = mimeType;
+    this.audioChunks = [];
+    this.voiceSeconds = 0;
+
+    try {
+      this.mediaRecorder = mimeType ? new MediaRecorder(this.audioStream, { mimeType }) : new MediaRecorder(this.audioStream);
+    } catch (err) {
+      console.warn("Falling back to default MediaRecorder options", err);
+      this.mediaRecorder = new MediaRecorder(this.audioStream);
+    }
+
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        this.audioChunks.push(e.data);
+      }
+    };
+
+    this.mediaRecorder.start(250); // Slice chunks every 250ms
+    this.isRecordingVoice = true;
+
+    // Update UI state
+    if (this.voiceRecordingHud) this.voiceRecordingHud.style.display = "flex";
+    if (this.btnVoiceRecord) this.btnVoiceRecord.classList.add("recording");
+    if (this.voiceDurationCounter) this.voiceDurationCounter.textContent = "00:00";
+
+    this.voiceTimer = setInterval(() => {
+      this.voiceSeconds++;
+      const mins = String(Math.floor(this.voiceSeconds / 60)).padStart(2, "0");
+      const secs = String(this.voiceSeconds % 60).padStart(2, "0");
+      if (this.voiceDurationCounter) {
+        this.voiceDurationCounter.textContent = `${mins}:${secs}`;
+      }
+    }, 1000);
+  }
+
+  stopVoiceRecording(saveAndProcess = true) {
+    if (!this.isRecordingVoice || !this.mediaRecorder) return;
+
+    if (this.voiceTimer) {
+      clearInterval(this.voiceTimer);
+      this.voiceTimer = null;
+    }
+
+    this.isRecordingVoice = false;
+    if (this.voiceRecordingHud) this.voiceRecordingHud.style.display = "none";
+    if (this.btnVoiceRecord) this.btnVoiceRecord.classList.remove("recording");
+
+    if (!saveAndProcess) {
+      // Discard recording
+      if (this.audioStream) {
+        this.audioStream.getTracks().forEach(t => t.stop());
+        this.audioStream = null;
+      }
+      this.audioChunks = [];
+      return;
+    }
+
+    const duration = this.voiceSeconds;
+
+    this.mediaRecorder.onstop = async () => {
+      if (this.audioStream) {
+        this.audioStream.getTracks().forEach(t => t.stop());
+        this.audioStream = null;
+      }
+
+      const recordedBlob = new Blob(this.audioChunks, { type: this.recordingMimeType || "audio/webm" });
+      this.audioChunks = [];
+      await this.processVoiceRecording(recordedBlob, duration);
+    };
+
+    try {
+      this.mediaRecorder.stop();
+    } catch (e) {
+      console.warn("Error stopping mediaRecorder:", e);
+    }
+  }
+
+  appendVoiceUserMessage({ audioUrl, transcript, durationSeconds, referencedNodes = [] }) {
+    const msgDiv = document.createElement("div");
+    msgDiv.className = "chat-message user chat-voice-user-message";
+
+    const avatar = document.createElement("div");
+    avatar.className = "chat-message-avatar";
+    avatar.textContent = "👤";
+
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble chat-voice-bubble";
+
+    const mins = Math.floor(durationSeconds / 60);
+    const secs = String(durationSeconds % 60).padStart(2, "0");
+    const durationFormatted = `${mins}:${secs}`;
+
+    let referencedCardsHtml = "";
+    if (referencedNodes && referencedNodes.length > 0) {
+      referencedCardsHtml = referencedNodes.map(node => {
+        const partsCount = (node.bom && node.bom.length) ? `${node.bom.length} BOM items` : "No BOM listed";
+        return `
+          <div class="chat-project-card" data-id="${node.id}" style="margin-bottom: 6px;">
+            <div class="chat-card-top">
+              <span>📌</span>
+              <strong class="chat-card-title">${this.escapeHtml(node.title || node.name)}</strong>
+              <span class="chat-card-badge">${this.escapeHtml(node.category || "General")}</span>
+            </div>
+            <div class="chat-card-desc">${this.escapeHtml(node.description || "No description provided.")}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    bubble.innerHTML = `
+      <div class="chat-voice-card">
+        <div class="chat-voice-header">
+          <span class="chat-voice-badge">🎙️ Voice Note (${durationFormatted})</span>
+          <span class="chat-voice-whisper-tag">Whisper AI</span>
+        </div>
+
+        <audio controls src="${audioUrl}" class="chat-voice-player" preload="metadata"></audio>
+
+        ${referencedCardsHtml}
+
+        <details class="whisper-transcript-accordion">
+          <summary class="whisper-transcript-summary">
+            <span>📝 Whisper Transcript</span>
+            <span class="whisper-toggle-hint">Show text ▾</span>
+          </summary>
+          <div class="whisper-transcript-content">
+            <p>${this.escapeHtml(transcript)}</p>
+          </div>
+        </details>
+      </div>
+    `;
+
+    msgDiv.appendChild(avatar);
+    msgDiv.appendChild(bubble);
+
+    if (this.messagesContainer) {
+      this.messagesContainer.appendChild(msgDiv);
+      this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    }
+    return msgDiv;
+  }
+
+  async processVoiceRecording(audioBlob, durationSeconds) {
+    if (this.isBusy) return;
+
+    if (!audioBlob || audioBlob.size < 200) {
+      if (this.app && this.app.showToast) {
+        this.app.showToast("Voice recording was too short or empty.", "warn");
+      }
+      return;
+    }
+
+    // Capture any project nodes referenced in the input box before recording
+    const { referencedNodes } = this.serializeInput();
+    if (this.input) this.input.innerHTML = "";
+    this.adjustInputHeight();
+    this.hideMentionPopup();
+
+    this.isBusy = true;
+    this.btnSend.disabled = true;
+    if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = true;
+
+    // Step 1: Upload to Whisper & transcribe
+    const loadingElem = this.appendLoadingIndicator("🎙️ Transcribing voice recording with Whisper AI...");
+
+    let transcriptData = null;
+    try {
+      const formData = new FormData();
+      const ext = (this.recordingMimeType && this.recordingMimeType.includes("ogg")) ? "ogg" : "webm";
+      formData.append("file", audioBlob, `voice_recording_${Date.now()}.${ext}`);
+
+      const resp = await fetch("/api/whisper/transcribe", {
+        method: "POST",
+        body: formData
+      });
+
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Whisper error (HTTP ${resp.status})`);
+      }
+
+      transcriptData = await resp.json();
+    } catch (err) {
+      loadingElem.remove();
+      this.isBusy = false;
+      this.btnSend.disabled = false;
+      if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = false;
+
+      this.appendErrorCard({
+        provider: "Whisper AI",
+        model: "base",
+        errorMessage: `Failed to transcribe audio recording: ${err.message}`,
+        originalText: "Voice Recording",
+        referencedNodes: referencedNodes,
+        bubbleHtml: `<div>🎙️ <em>Voice Recording (${durationSeconds}s) failed transcription.</em></div>`
+      });
+      return;
+    }
+
+    loadingElem.remove();
+
+    const rawTranscript = (transcriptData.text || "").trim();
+    if (!rawTranscript) {
+      this.isBusy = false;
+      this.btnSend.disabled = false;
+      if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = false;
+
+      if (this.app && this.app.showToast) {
+        this.app.showToast("No clear speech detected by Whisper. Please speak louder or closer to the mic.", "warn");
+      } else {
+        this.appendMessage("assistant", "⚠️ **Whisper AI**: No speech could be detected in the recording. Please try speaking closer to your microphone.", false);
+      }
+      return;
+    }
+
+    // Step 2: Append the user Voice Note card to chat (collapsible Whisper transcript)
+    this.appendVoiceUserMessage({
+      audioUrl: transcriptData.audio_url,
+      transcript: rawTranscript,
+      durationSeconds,
+      referencedNodes
+    });
+    this.history.push({ role: "user", content: rawTranscript });
+
+    // Step 3: Pipe the Whisper transcript into the selected AI Agent
+    const providerName = (this.agentConfig.provider || "AI").toUpperCase();
+    const aiLoadingElem = this.appendLoadingIndicator(`${providerName} is structuring project & analyzing tangents...`);
+
+    try {
+      const chatResp = await fetch("/api/mcp/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: rawTranscript,
+          history: this.history,
+          provider: this.agentConfig.provider || "agy",
+          model: this.agentConfig.model,
+          endpoint_url: this.agentConfig.endpoint_url,
+          api_key: this.agentConfig.api_key,
+          referenced_ideas: referencedNodes,
+          is_voice: true,
+          voice_metadata: {
+            audio_url: transcriptData.audio_url,
+            duration: durationSeconds,
+            language: transcriptData.language
+          }
+        })
+      });
+
+      const chatData = await chatResp.json();
+      aiLoadingElem.remove();
+
+      if (chatData.success && chatData.response) {
+        let respText = chatData.response;
+        if (chatData.attempts && chatData.attempts > 1) {
+          respText += `\n\n*(⚡ AI diagnosed failure and self-corrected on attempt ${chatData.attempts})*`;
+        }
+        this.appendMessage("assistant", respText, true);
+        this.history.push({ role: "assistant", content: chatData.response });
+
+        // Refresh graph data in case agent created or linked ideas
+        await this.app.loadGraphData();
+      } else {
+        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+          this.history.pop();
+        }
+        const errMsg = chatData.error || "Failed to receive response from agent.";
+        this.appendErrorCard({
+          provider: this.agentConfig.provider || "agy",
+          model: chatData.model || this.agentConfig.model,
+          errorMessage: errMsg,
+          originalText: rawTranscript,
+          referencedNodes: referencedNodes,
+          bubbleHtml: `<div>🎙️ Voice idea: <em>${this.escapeHtml(rawTranscript.substring(0, 100))}...</em></div>`
+        });
+      }
+    } catch (err) {
+      aiLoadingElem.remove();
+      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
+        this.history.pop();
+      }
+      this.appendErrorCard({
+        provider: this.agentConfig.provider || "agy",
+        model: this.agentConfig.model,
+        errorMessage: err.message,
+        originalText: rawTranscript,
+        referencedNodes: referencedNodes,
+        bubbleHtml: `<div>🎙️ Voice idea: <em>${this.escapeHtml(rawTranscript.substring(0, 100))}...</em></div>`
+      });
+    } finally {
+      this.isBusy = false;
+      this.btnSend.disabled = false;
+      if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = false;
+      if (this.input) this.input.focus();
+    }
+  }
+
 }
 
 window.McpChatManager = McpChatManager;

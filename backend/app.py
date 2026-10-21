@@ -1,6 +1,7 @@
 import os
 import sys
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict, Any, List
@@ -13,6 +14,7 @@ from backend.models import (
 from backend import database
 from backend.graph_engine import engine
 from backend.antigravity_client import antigravity_client
+from backend import whisper_service
 
 # Initialize database & sync markdown files on disk
 database.init_db()
@@ -201,6 +203,40 @@ async def get_claude_models():
         ]
     }
 
+@app.get("/api/whisper/status")
+async def whisper_status_endpoint():
+    return whisper_service.is_whisper_available()
+
+@app.post("/api/whisper/transcribe")
+async def whisper_transcribe_endpoint(file: UploadFile = File(...), model: Optional[str] = Query("base")):
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio recording submitted")
+    print(f"\n[API /api/whisper/transcribe] Received {file.filename} ({len(audio_bytes)} bytes)...", flush=True)
+    res = await whisper_service.transcribe_audio_file(
+        file_bytes=audio_bytes,
+        original_filename=file.filename,
+        model_name=model or "base"
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=500, detail=res.get("error", "Whisper transcription failed"))
+    return res
+
+@app.get("/api/whisper/audio/{filename}")
+async def whisper_audio_endpoint(filename: str):
+    safe_name = os.path.basename(filename)
+    audio_path = os.path.join(whisper_service.get_audio_dir(), safe_name)
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Audio recording not found")
+    media_type = "audio/webm"
+    if safe_name.endswith(".ogg"):
+        media_type = "audio/ogg"
+    elif safe_name.endswith(".wav"):
+        media_type = "audio/wav"
+    elif safe_name.endswith(".mp3"):
+        media_type = "audio/mpeg"
+    return FileResponse(audio_path, media_type=media_type)
+
 @app.post("/api/mcp/chat")
 async def mcp_chat_endpoint(req: McpChatRequest):
     message = (req.message or "").strip()
@@ -209,7 +245,8 @@ async def mcp_chat_endpoint(req: McpChatRequest):
     if not message and req.referenced_ideas:
         message = "Please review and analyze this referenced project."
 
-    print(f"\n[API /api/mcp/chat] Incoming message: '{message[:80]}...' (provider: {req.provider or 'agy'}, model: {req.model}, refs: {len(req.referenced_ideas or [])})", flush=True)
+    voice_tag = " [VOICE-TRANSCRIBED]" if req.is_voice else ""
+    print(f"\n[API /api/mcp/chat] Incoming message{voice_tag}: '{message[:80]}...' (provider: {req.provider or 'agy'}, model: {req.model}, refs: {len(req.referenced_ideas or [])})", flush=True)
 
     result = await antigravity_client.chat_with_agent(
         message=message,
@@ -218,7 +255,8 @@ async def mcp_chat_endpoint(req: McpChatRequest):
         model=req.model,
         referenced_ideas=req.referenced_ideas,
         endpoint_url=req.endpoint_url,
-        api_key=req.api_key
+        api_key=req.api_key,
+        is_voice=req.is_voice
     )
 
     if result.get("success"):

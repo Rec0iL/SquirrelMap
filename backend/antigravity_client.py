@@ -333,7 +333,8 @@ Respond ONLY with valid JSON:
         model: Optional[str] = None,
         referenced_ideas: Optional[List[Dict[str, Any]]] = None,
         endpoint_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        is_voice: Optional[bool] = False
     ) -> Dict[str, Any]:
         """Unified multi-agent interface supporting AGY, Claude, Codex, Ollama, OpenCode, and Custom Agents.
         Includes an automated 3-attempt diagnostic self-correction loop when errors or empty outputs occur."""
@@ -375,7 +376,27 @@ Always be concise, practical, creative, and reference specific components and co
             if formatted_turns:
                 history_context = "Conversation history:\n" + "\n".join(formatted_turns) + "\n\n"
 
-        base_prompt = f"{system_instruction}\n\n{referenced_context}{history_context}User: {message}\nAssistant:"
+        voice_directive = ""
+        if is_voice:
+            voice_directive = """
+[VOICE TRANSCRIPTION DIRECTIVE - WHISPER SPEECH-TO-PROJECT SYNTHESIS]
+The user message below was transcribed from a spoken recording using Whisper AI.
+Spoken descriptions are naturally loosely structured, full of tangents, side notes, and stream-of-consciousness brainstorming.
+Your task is to:
+1. STRUCTURE INTO A PROPER PROJECT:
+   - Identify the primary project concept and give it a crisp, memorable Project Title.
+   - Suggest or assign a fitting Category (from existing categories or invent a fresh one if it breaks new ground).
+   - Core Concept & Objectives: Summarize what the user is trying to build.
+   - Key Features: Organized, bulleted list of functionality.
+   - Implementation / Prototyping Roadmap: Practical steps to assemble or code it.
+   - Preliminary Bill of Materials (BOM): List specific parts, sensors, modules, mechanical hardware, or materials mentioned or implied.
+2. EXTRACT OPEN QUESTIONS, ISSUES & TANGENTS:
+   At the very end of your response, create a dedicated markdown section:
+   ### ❓ Open Questions, Tangents & Unresolved Ideas
+   Extract and highlight every tangent, unresolved doubt, alternative direction, or question the user mentioned during their speech, and provide your constructive recommendation or resolution for each one.
+"""
+
+        base_prompt = f"{system_instruction}\n{voice_directive}\n\n{referenced_context}{history_context}User: {message}\nAssistant:"
         current_prompt = base_prompt
         last_error = None
         max_attempts = 3

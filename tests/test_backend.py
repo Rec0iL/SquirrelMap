@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from backend import database
 from backend.graph_engine import engine, MindmapGraphEngine
 from backend.antigravity_client import antigravity_client
+from backend import whisper_service
 
 class TestSquirrelMapBackend(unittest.TestCase):
     def setUp(self):
@@ -52,6 +53,12 @@ class TestSquirrelMapBackend(unittest.TestCase):
         conn.close()
         self.assertIsNotNone(row)
         self.assertIn(row[0], ["true", "1"])
+
+    def test_whisper_availability(self):
+        status = whisper_service.is_whisper_available()
+        self.assertTrue(status.get("available"))
+        self.assertTrue(status.get("cuda"))
+        self.assertEqual(status.get("default_model"), "base")
 
 if __name__ == "__main__":
     unittest.main()
