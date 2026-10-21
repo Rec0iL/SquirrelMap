@@ -85,3 +85,7 @@ backend/mindmap.db
 # Local screenshots
 Bildschirmfoto*.png
 Screenshot*.png
+
+# Seed marker
+.seeded
+ideas/.seeded

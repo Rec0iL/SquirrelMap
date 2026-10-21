@@ -58,8 +58,19 @@ def init_db():
     )
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
+
+    # Mark seeded if existing markdown files are present
+    if os.path.exists(IDEAS_DIR) and any(f.endswith(".md") for f in os.listdir(IDEAS_DIR)):
+        mark_as_seeded()
 
     # Sync from markdown files on disk
     sync_from_markdown_files()
@@ -221,6 +232,39 @@ def write_markdown_file(idea: IdeaNode, connections: Optional[List[Dict[str, Any
 
     return file_path
 
+def is_already_seeded() -> bool:
+    marker_path = os.path.join(IDEAS_DIR, ".seeded")
+    if os.path.exists(marker_path):
+        return True
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        cursor.execute("SELECT value FROM meta WHERE key = 'has_seeded_defaults'")
+        row = cursor.fetchone()
+        conn.close()
+        return bool(row and row[0] == 'true')
+    except Exception:
+        return False
+
+def mark_as_seeded():
+    try:
+        marker_path = os.path.join(IDEAS_DIR, ".seeded")
+        if not os.path.exists(marker_path):
+            with open(marker_path, "w", encoding="utf-8") as f:
+                f.write("seeded=true\n")
+    except Exception:
+        pass
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        cursor.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('has_seeded_defaults', 'true')")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error marking as seeded: {e}")
+
 def sync_from_markdown_files():
     """Reads all .md files in ideas/ and updates SQLite database."""
     if not os.path.exists(IDEAS_DIR):
@@ -228,8 +272,11 @@ def sync_from_markdown_files():
 
     md_files = [os.path.join(IDEAS_DIR, f) for f in os.listdir(IDEAS_DIR) if f.endswith(".md")]
 
-    if len(md_files) == 0:
+    # Only seed default example ideas ONCE on brand new installation.
+    # Never recreate examples when the user intentionally deletes all nodes!
+    if len(md_files) == 0 and not is_already_seeded():
         seed_default_ideas()
+        mark_as_seeded()
         md_files = [os.path.join(IDEAS_DIR, f) for f in os.listdir(IDEAS_DIR) if f.endswith(".md")]
 
     conn = get_connection()

@@ -389,7 +389,11 @@ class IdeaMindmapApp {
       // Refresh inspector if an idea is already selected
       if (this.selectedNode) {
         const fresh = this.allNodes.find(n => n.id === this.selectedNode.id);
-        if (fresh) this.onNodeSelected(fresh);
+        if (fresh) {
+          this.onNodeSelected(fresh);
+        } else {
+          this.closeInspector();
+        }
       }
     } catch (err) {
       console.error('Failed to load graph data:', err);
