@@ -571,12 +571,28 @@ class IdeaGraph3D {
   }
 
   setupWindowResize() {
-    window.addEventListener('resize', () => {
-      if (this.graph && this.container) {
-        this.graph.width(this.container.clientWidth);
-        this.graph.height(this.container.clientHeight);
+    // Keep the WebGL canvas in sync with its container. A ResizeObserver also catches
+    // maximize/restore and DPI changes that do not always deliver a timely window "resize" event.
+    const fit = () => {
+      if (!this.graph || !this.container) return;
+      const w = this.container.clientWidth;
+      const h = this.container.clientHeight;
+      if (w > 0 && h > 0 && (w !== this._fitW || h !== this._fitH)) {
+        this._fitW = w;
+        this._fitH = h;
+        this.graph.width(w);
+        this.graph.height(h);
       }
-    });
+    };
+    const scheduleFit = () => requestAnimationFrame(fit);
+
+    window.addEventListener('resize', scheduleFit);
+    if (typeof ResizeObserver !== 'undefined' && this.container) {
+      new ResizeObserver(scheduleFit).observe(this.container);
+    }
+    // Window may still be settling (e.g. maximized right after launch)
+    window.addEventListener('load', () => { scheduleFit(); setTimeout(fit, 500); setTimeout(fit, 1500); });
+    scheduleFit();
   }
 }
 

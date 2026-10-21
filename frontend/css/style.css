@@ -96,19 +96,16 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
-  height: 100vh;
-  width: 100vw;
+  position: fixed;
+  inset: 0;
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }
 
 /* 3D Canvas Viewport */
-#3d-graph {
+#\33 d-graph {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   z-index: 1;
 }
 
@@ -888,10 +885,7 @@ body {
 
 .modal-backdrop {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
