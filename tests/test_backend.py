@@ -95,5 +95,31 @@ An overview.
         self.assertIsNone(database.get_chat_session(cid))
         self.assertIsNone(database.delete_chat_session(cid))
 
+    def test_agent_actions(self):
+        from backend import agent_actions
+        from backend.models import IdeaNode, BOMItem
+        a = IdeaNode(id="zz-act-a", title="Act A", bom=[BOMItem(item="ESP32", qty=1)])
+        b = IdeaNode(id="zz-act-b", title="Act B", tags=["x"], bom=[BOMItem(item="LED", qty=3)])
+        database.save_or_update_idea(a)
+        database.save_or_update_idea(b)
+        try:
+            reply = ("Done.\n```squirrelmap-actions\n"
+                     '[{"action":"update_idea","id":"zz-act-a","add_bom":[{"item":"esp32","qty":2}],"status":"idea"},'
+                     '{"action":"add_connection","source":"zz-act-a","target":"Act B"},'
+                     '{"action":"merge_ideas","keep_id":"zz-act-a","remove_id":"zz-act-b"},'
+                     '{"action":"delete_idea","id":"nope"}]\n```')
+            shown, results = agent_actions.process_response(reply)
+            self.assertNotIn("squirrelmap-actions", shown)
+            self.assertEqual([ok for ok, _ in results], [True, True, True, False])
+            merged = database.get_idea_by_id("zz-act-a")
+            self.assertEqual({x.item.lower(): x.qty for x in merged.bom}, {"esp32": 3, "led": 3})
+            self.assertIsNone(database.get_idea_by_id("zz-act-b"))
+            ok, _ = agent_actions.run_actions([{"action": "delete_idea", "id": "zz-act-a"}])[0]
+            self.assertTrue(ok)
+            self.assertIsNone(database.get_idea_by_id("zz-act-a"))
+        finally:
+            database.delete_idea("zz-act-a")
+            database.delete_idea("zz-act-b")
+
 if __name__ == "__main__":
     unittest.main()

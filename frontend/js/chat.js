@@ -787,6 +787,7 @@ class McpChatManager {
       <p>I have direct MCP tool access to your project graph and local Markdown files:</p>
       <ul>
         <li><strong>Add & Brainstorm Ideas:</strong> Tell me an idea and I'll categorize it, list BOM parts, and save the <code>.md</code> file.</li>
+        <li><strong>Edit & Clean up:</strong> Ask me to rename, re-tag, change status, edit the BOM or notes, merge duplicates or delete projects (deleted notes go to a <code>trash</code> folder).</li>
         <li><strong>Analyze BOM:</strong> Ask for bulk-buy purchasing recommendations across all projects.</li>
         <li><strong>Link & Fuse:</strong> Connect related projects or combine duplicate ideas.</li>
       </ul>

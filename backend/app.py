@@ -15,6 +15,7 @@ from backend import database
 from backend.graph_engine import engine
 from backend.antigravity_client import antigravity_client
 from backend import whisper_service
+from backend import agent_actions
 
 # Initialize database & sync markdown files on disk
 database.init_db()
@@ -274,6 +275,11 @@ async def _mcp_chat_impl(req: McpChatRequest):
         resp_len = len(result.get("response", ""))
         attempts = result.get("attempts", 1)
         print(f"[API /api/mcp/chat] Success (attempts: {attempts}, len: {resp_len} chars)", flush=True)
+
+        # Execute commands the agent issued (delete/update/link/merge) and report them in the reply
+        result["response"], action_results = agent_actions.process_response(result.get("response", ""))
+        for ok, msg in action_results:
+            print(f"[API /api/mcp/chat] Agent action {'OK' if ok else 'FAILED'}: {msg}", flush=True)
 
         # Auto-detect and save project notes drafted with YAML frontmatter
         extracted = database.extract_idea_from_text(result.get("response", ""))

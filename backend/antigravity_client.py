@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 
 from backend.database import DATA_DIR as _DB_DATA_DIR, IDEAS_DIR
 from backend.whisper_service import _get_clean_subprocess_env
+from backend import agent_actions
 
 # DATA_DIR may be unset (dev mode); fall back to the ideas folder's parent
 DATA_DIR = _DB_DATA_DIR or os.path.dirname(IDEAS_DIR)
@@ -350,6 +351,8 @@ Respond ONLY with valid JSON:
 
         # Build Context & Base Prompt
         user_vault = os.path.expanduser("~/SquirrelMap")
+        project_index = agent_actions.build_project_index()
+        command_reference = agent_actions.COMMAND_REFERENCE
         system_instruction = f"""You are the Creative Mindmap AI Partner.
 Your job is to manage, connect, organize, and expand the user's creative ideas and maker projects.
 Each project has a Markdown file, frontmatter metadata, a Bill of Materials (BOM), and connections.
@@ -358,7 +361,11 @@ You have full authority to suggest or create new project categories whenever ide
 
 WORKING DIRECTORY & PROJECT VAULT:
 Your working directory is: {DATA_DIR}
-Project Markdown files are stored in: {IDEAS_DIR} (read-only for you; do not modify it).
+Project Markdown files are stored in: {IDEAS_DIR}. You may read them, but NEVER edit or delete files yourself - use the SquirrelMap commands below.
+
+{project_index}
+
+{command_reference}
 
 WHEN THE USER ASKS YOU TO CREATE, ADD, OR STASH A PROJECT:
 1. Always format your project note with full YAML frontmatter and structured markdown:
