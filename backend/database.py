@@ -131,6 +131,17 @@ def parse_markdown_file(file_path: str) -> Optional[Dict[str, Any]]:
                 elif isinstance(b, str) and b.strip():
                     bom_items.append({"item": b.strip(), "qty": 1, "notes": "", "link": ""})
 
+        # Also extract BOM table if body contains markdown table under ## BOM
+        if not bom_items and "## BOM" in body:
+            bom_section = body.split("## BOM")[1].split("##")[0]
+            for line in bom_section.split("\n"):
+                if "|" in line and not line.strip().startswith("| ---") and not line.strip().lower().startswith("| item") and not line.strip().lower().startswith("| teil"):
+                    cols = [c.strip() for c in line.split("|") if c.strip()]
+                    if cols:
+                        item_name = cols[0]
+                        notes = cols[1] if len(cols) > 1 else ""
+                        bom_items.append({"item": item_name, "qty": 1, "notes": notes, "link": ""})
+
         connections = frontmatter_data.get("connections", [])
 
         description = frontmatter_data.get("description", "")
