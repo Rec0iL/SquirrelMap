@@ -452,6 +452,8 @@ body {
   z-index: 15;
   pointer-events: auto;
   flex-wrap: wrap;
+  /* Wrap instead of sliding under the open inspector (its width + margins, set from app.js) */
+  max-width: calc(100vw - 40px - var(--insp-reserved, 0px));
 }
 
 .hud-mode-pill {
@@ -3218,3 +3220,515 @@ body {
 .chat-history-title { font-size: 0.85rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-history-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
 .chat-history-delete { flex-shrink: 0; }
+
+/* ==========================================================================
+   IDEA INSPECTOR (resizable, full-height notes)
+   ========================================================================== */
+
+.side-panel.inspector {
+  width: var(--insp-width, 480px);
+  max-width: calc(100vw - 32px);
+  z-index: 16; /* above the view toolbar, which only reaches under a very wide panel */
+  transform: translateX(calc(100% + 32px));
+  container-type: inline-size;
+  container-name: inspector;
+}
+
+.side-panel.inspector.open {
+  transform: translateX(0);
+}
+
+.side-panel.inspector.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.inspector-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  z-index: 5;
+}
+
+.inspector-resize-handle:hover,
+.side-panel.inspector.resizing .inspector-resize-handle {
+  background: linear-gradient(to right, var(--accent-primary), transparent);
+  opacity: 0.45;
+}
+
+.insp-header {
+  padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.insp-header-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.insp-title-input {
+  flex: 1;
+  min-width: 0;
+  margin-left: -7px;
+  padding: 5px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.insp-title-input:hover {
+  border-color: var(--glass-border);
+}
+
+.insp-title-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: rgba(10, 15, 26, 0.6);
+}
+
+.insp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.insp-header-actions .panel-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+}
+
+.insp-header-actions .panel-icon-btn[aria-pressed="true"] {
+  color: #22d3ee;
+  background: rgba(6, 182, 212, 0.18);
+}
+
+.insp-icon-danger:hover {
+  color: var(--danger) !important;
+  background: rgba(244, 63, 94, 0.15) !important;
+}
+
+#btnInspectorWide .icon-collapse,
+#btnInspectorWide[aria-pressed="true"] .icon-expand {
+  display: none;
+}
+
+#btnInspectorWide[aria-pressed="true"] .icon-collapse {
+  display: block;
+}
+
+.insp-meta-row {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) minmax(150px, 2fr);
+  gap: 6px;
+}
+
+.insp-meta-row .form-input,
+.insp-meta-row .form-select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 2px 9px;
+  font-size: 0.78rem;
+  border-radius: var(--radius-sm);
+}
+
+.insp-meta-row .form-select {
+  font-weight: 600;
+}
+
+@container inspector (max-width: 460px) {
+  .insp-meta-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .insp-meta-row .insp-meta-tags {
+    grid-column: 1 / -1;
+  }
+}
+
+.inspector .inspector-tab-nav {
+  margin-top: 0;
+  padding: 0 10px;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.inspector .insp-tab-btn {
+  flex: 1 0 auto;
+  justify-content: center;
+  white-space: nowrap;
+  padding: 10px 10px 9px;
+}
+
+.insp-tab-count {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.insp-tab-count:empty {
+  display: none;
+}
+
+.inspector .insp-body {
+  padding: 14px 16px 16px 18px;
+  gap: 0;
+  min-height: 0;
+}
+
+.inspector .insp-tab-pane {
+  padding: 0;
+  min-width: 0;
+}
+
+.inspector .insp-tab-pane.active {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.insp-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.insp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.insp-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Notes: the editor fills the panel height instead of a small fixed box */
+.inspector #tabNotes.active {
+  flex: 1;
+  min-height: 0;
+}
+
+.inspector .md-editor-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.inspector .md-toolbar {
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.md-editor-container.mode-read .md-tool-btn {
+  display: none;
+}
+
+.md-view-btn {
+  font-weight: 600;
+}
+
+.md-panes {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  gap: 10px;
+}
+
+.md-panes .md-textarea,
+.md-panes .md-preview-box {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+}
+
+.md-panes .md-textarea {
+  resize: none;
+  padding: 12px 14px;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.md-editor-container.mode-read .md-textarea,
+.md-editor-container.mode-edit .md-preview-box {
+  display: none;
+}
+
+/* Side-by-side only fits in a wide panel; narrower, split behaves like edit */
+@container inspector (max-width: 719px) {
+  .md-editor-container.mode-split .md-preview-box,
+  #btnMdSplitMode {
+    display: none;
+  }
+}
+
+.inspector .md-preview-box {
+  padding: 14px 18px;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.inspector .md-preview-box > :first-child {
+  margin-top: 0;
+}
+
+.inspector .md-preview-box h1 { font-size: 1.35rem; color: var(--text-primary); margin: 18px 0 8px; }
+.inspector .md-preview-box h2 { font-size: 1.12rem; color: #38bdf8; margin: 18px 0 6px; }
+.inspector .md-preview-box h3 { font-size: 0.98rem; color: #7dd3fc; margin: 14px 0 6px; }
+.inspector .md-preview-box h4 { font-size: 0.9rem; margin: 12px 0 4px; }
+.inspector .md-preview-box a { color: var(--accent-primary); }
+.inspector .md-preview-box img { max-width: 100%; }
+.inspector .md-preview-box li { margin-bottom: 3px; }
+.inspector .md-preview-box li > input[type="checkbox"] { margin-right: 6px; }
+
+.inspector .md-preview-box table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 8px 0 14px;
+  font-size: 0.84rem;
+}
+
+.inspector .md-preview-box th,
+.inspector .md-preview-box td {
+  border: 1px solid var(--glass-border);
+  padding: 5px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.inspector .md-preview-box th {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.inspector .md-preview-box blockquote {
+  margin: 8px 0 12px;
+  padding: 2px 12px;
+  border-left: 3px solid var(--accent-primary);
+  color: var(--text-secondary);
+}
+
+.inspector .md-preview-box hr {
+  border: none;
+  border-top: 1px solid var(--glass-border);
+  margin: 16px 0;
+}
+
+.md-preview-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* BOM */
+.bom-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px auto;
+  gap: 6px;
+}
+
+.inspector .bom-section .form-input {
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+}
+
+.inspector .bom-section .btn-action {
+  height: auto;
+}
+
+.bom-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.inspector .bom-item-card {
+  gap: 8px;
+}
+
+.inspector .bom-item-info {
+  min-width: 0;
+}
+
+.inspector .bom-item-title,
+.inspector .bom-item-notes {
+  overflow-wrap: anywhere;
+}
+
+/* Connections */
+.conn-item {
+  --conn-color: #64748b;
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 9px 6px 9px 0;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.conn-item:hover {
+  border-color: color-mix(in srgb, var(--conn-color) 45%, transparent);
+}
+
+.conn-item-stripe {
+  align-self: stretch;
+  margin: -9px 0;
+  background: var(--conn-color);
+}
+
+.conn-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conn-item-title {
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.conn-item-title:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+.conn-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.conn-type-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--conn-color);
+  background: color-mix(in srgb, var(--conn-color) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--conn-color) 35%, transparent);
+}
+
+.conn-item-desc {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.conn-item-parts {
+  font-size: 0.72rem;
+  color: #38bdf8;
+  overflow-wrap: anywhere;
+}
+
+.conn-item .panel-icon-btn:hover {
+  color: var(--danger);
+  background: rgba(244, 63, 94, 0.15);
+}
+
+.inspector .create-link-card {
+  padding: 14px;
+  gap: 12px;
+}
+
+.inspector .create-link-card .form-input,
+.inspector .create-link-card .form-select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+}
+
+.link-direction-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.create-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.create-link-actions .btn-action {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.inspector .cascade-node-name {
+  max-width: 220px;
+}
+
+/* Footer: save state is always visible */
+.insp-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 12px 18px;
+  border-top: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+
+.insp-save-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.insp-save-status.dirty { color: #fbbf24; }
+.insp-save-status.saved { color: #34d399; }
+.insp-save-status.error { color: var(--danger); }
+
+.insp-deselect-btn {
+  color: #f87171 !important;
+  border-color: rgba(248, 113, 113, 0.3) !important;
+}

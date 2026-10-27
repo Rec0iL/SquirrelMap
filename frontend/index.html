@@ -6,7 +6,7 @@
   <title>SquirrelMap — 3D Idea Mindmap & Sourcing Graph</title>
   <meta name="description" content="An interactive 3D idea mindmap and maker project graph with local Markdown notes, cross-project BOM parts bulk-sourcing, and autonomous AI agents.">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="css/style.css?v=42">
+  <link rel="stylesheet" href="css/style.css?v=45">
 </head>
 <body class="theme-glass-dark">
 
@@ -121,7 +121,7 @@
         <option value="category" selected>🌐 Project Category</option>
         <option value="status">🚦 Development Status</option>
         <option value="degree">🔥 Connection Density</option>
-        <option value="cascade">🌊 Multi-Hop Cascade</option>
+        <option value="reach">🌊 Distance from Selected</option>
       </select>
     </div>
   </aside>
@@ -151,56 +151,56 @@
     <span>Shared BOM Links: <strong id="statSharedBomCount">0</strong></span>
   </div>
 
-  <!-- Collapsible Idea Inspector & Markdown Editor Side Panel -->
-  <aside id="inspectorPanel" class="side-panel" aria-label="Idea Inspector">
-    <div class="panel-header">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <select id="inspStatusSelect" class="form-select" style="font-size: 0.74rem; height: 30px; padding: 2px 8px; font-weight: 600;">
+  <!-- Idea Inspector: resizable side panel with markdown notes, BOM, connections and synergies -->
+  <aside id="inspectorPanel" class="side-panel inspector" aria-label="Idea Inspector">
+    <div id="inspectorResizeHandle" class="inspector-resize-handle" title="Drag to resize · double-click to toggle wide view"></div>
+
+    <header class="insp-header">
+      <div class="insp-header-top">
+        <input type="text" id="inspTitleInput" class="insp-title-input" placeholder="Project title…" aria-label="Project title">
+        <div class="insp-header-actions">
+          <button id="btnInspectorWide" class="panel-icon-btn" title="Wide view (notes and preview side by side)" aria-pressed="false">
+            <svg class="icon-expand" style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M21 11V3h-8l3.29 3.29-10 10L3 13v8h8l-3.29-3.29 10-10z"/></svg>
+            <svg class="icon-collapse" style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M22 3.41 16.71 8.7 20 12h-8V4l3.29 3.29L20.59 2 22 3.41zM3.41 22l5.29-5.29L12 20v-8H4l3.29 3.29L2 20.59 3.41 22z"/></svg>
+          </button>
+          <button id="btnFocusNode" class="panel-icon-btn" title="Focus camera on this project">
+            <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+          </button>
+          <button id="btnToggleAddToSelection" class="panel-icon-btn" title="Add to multi-selection" aria-pressed="false">
+            <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          </button>
+          <button id="btnDeleteIdeaHeader" class="panel-icon-btn insp-icon-danger" title="Delete project">
+            <svg style="width: 15px; height: 15px; fill: currentColor;" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </button>
+          <button id="btnCloseInspector" class="panel-close-btn" title="Close panel">
+            <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="insp-meta-row">
+        <select id="inspStatusSelect" class="form-select" aria-label="Status">
           <option value="concept">💡 Concept</option>
           <option value="prototyping">🔬 Prototyping</option>
           <option value="in-progress">🛠️ In Progress</option>
           <option value="completed">🚀 Completed</option>
           <option value="archived">📦 Archived</option>
         </select>
-        <input type="text" id="inspCategoryInput" class="form-input" list="categoryDatalist" style="height: 30px; font-size: 0.74rem; padding: 2px 8px; width: 140px;" placeholder="Category...">
+        <input type="text" id="inspCategoryInput" class="form-input" list="categoryDatalist" placeholder="Category" aria-label="Category">
+        <input type="text" id="inspTagsInput" class="form-input insp-meta-tags" placeholder="Tags, comma-separated" aria-label="Tags">
       </div>
-      <div style="display: flex; align-items: center; gap: 6px;">
-        <button id="btnDeleteIdeaHeader" class="panel-close-btn" title="Delete Idea" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4); width: 30px; height: 30px;">
-          <svg style="width: 16px; height: 16px; fill: currentColor;" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-        </button>
-        <button id="btnCloseInspector" class="panel-close-btn" title="Close Panel" style="width: 30px; height: 30px;">
-          <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </button>
-      </div>
-    </div>
+    </header>
 
-    <!-- Inspector Tabs Header -->
     <nav class="inspector-tab-nav" aria-label="Inspector Tabs">
       <button class="insp-tab-btn active" data-tab="tabNotes">📝 Notes</button>
-      <button class="insp-tab-btn" data-tab="tabBom">🛒 BOM Parts</button>
-      <button class="insp-tab-btn" data-tab="tabConnections">🔗 Connections</button>
+      <button class="insp-tab-btn" data-tab="tabBom">🛒 BOM <span id="inspBomCount" class="insp-tab-count"></span></button>
+      <button class="insp-tab-btn" data-tab="tabConnections">🔗 Connections <span id="inspConnCount" class="insp-tab-count"></span></button>
       <button class="insp-tab-btn" data-tab="tabSimilarities">✨ Synergies</button>
     </nav>
 
-    <div class="panel-body" style="padding-top: 10px;">
-      <!-- Multi-Selection Controls in Inspector -->
-      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-        <button id="btnToggleAddToSelection" class="btn-action btn-sm" style="flex: 1; justify-content: center;" title="Add or remove this project from your Multi-Selection">
-          <span class="btn-icon">➕</span> <span id="btnToggleAddToSelectionText">Add to Selection</span>
-        </button>
-        <button id="btnInspectorDeselectAll" class="btn-action btn-sm" style="color: #f87171; border-color: rgba(248, 113, 113, 0.3); display: none;" title="Deselect all selected projects">
-          Deselect All
-        </button>
-      </div>
-
-      <!-- Title & Tags Row -->
-      <input type="text" id="inspTitleInput" class="form-input" style="font-size: 1.05rem; font-weight: 700; margin-bottom: 6px;" placeholder="Project Title...">
-      <input type="text" id="inspTagsInput" class="form-input" style="font-size: 0.78rem; margin-bottom: 10px;" placeholder="Tags (comma-separated, e.g. esp32, 3d-printing)...">
-
+    <div class="panel-body insp-body">
       <!-- ================= TAB 1: MARKDOWN NOTES ================= -->
       <div id="tabNotes" class="insp-tab-pane active">
-        <div class="md-editor-container">
-          <!-- Markdown Toolbar -->
+        <div id="mdEditorContainer" class="md-editor-container mode-read">
           <div class="md-toolbar">
             <button class="md-tool-btn" data-insert="**" data-close="**" title="Bold"><b>B</b></button>
             <button class="md-tool-btn" data-insert="*" data-close="*" title="Italic"><i>I</i></button>
@@ -209,22 +209,18 @@
             <button class="md-tool-btn" data-insert="### " title="Heading 3">H3</button>
             <button class="md-tool-btn" data-insert="- " title="Bullet List">• List</button>
             <button class="md-tool-btn" data-insert="- [ ] " title="Task Checkbox">☑ Task</button>
+            <button class="md-tool-btn" data-insert="[" data-close="](https://)" title="Link">🔗</button>
 
-            <div class="md-view-switch">
-              <button id="btnMdEditMode" class="md-view-btn active">Edit</button>
-              <button id="btnMdPreviewMode" class="md-view-btn">Preview</button>
+            <div class="md-view-switch" role="group" aria-label="Notes view">
+              <button id="btnMdPreviewMode" class="md-view-btn" data-mode="read" title="Read the rendered note">Read</button>
+              <button id="btnMdEditMode" class="md-view-btn" data-mode="edit" title="Edit the markdown">Edit</button>
+              <button id="btnMdSplitMode" class="md-view-btn" data-mode="split" title="Edit with live preview side by side">Split</button>
             </div>
           </div>
 
-          <!-- Markdown Textarea -->
-          <textarea id="inspMarkdownTextarea" class="md-textarea" placeholder="Write full markdown notes, technical specs, pinouts, and design goals..."></textarea>
-
-          <!-- Markdown Live Preview -->
-          <div id="inspMarkdownPreview" class="md-preview-box" style="display: none;"></div>
-
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
-            <span id="markdownSaveStatus" style="font-size: 0.74rem; color: var(--text-muted);">Saved locally to markdown</span>
-            <button id="btnSaveMarkdownNotes" class="btn-action btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.78rem;">Save Notes</button>
+          <div class="md-panes">
+            <textarea id="inspMarkdownTextarea" class="md-textarea" spellcheck="true" placeholder="Write notes, technical specs, pinouts and design goals in markdown…"></textarea>
+            <div id="inspMarkdownPreview" class="md-preview-box" title="Double-click to edit"></div>
           </div>
         </div>
       </div>
@@ -232,105 +228,87 @@
       <!-- ================= TAB 2: BILL OF MATERIALS (BOM) ================= -->
       <div id="tabBom" class="insp-tab-pane">
         <div class="bom-section">
-          <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px;">
-            Components needed for this project. Shared parts are highlighted for bulk purchasing.
-          </div>
+          <div class="insp-hint">Components needed for this project. Shared parts are highlighted for bulk purchasing.</div>
 
-          <!-- Add BOM Item Form -->
-          <div style="display: flex; gap: 6px; margin-bottom: 8px;">
-            <input type="text" id="newBomItemName" class="form-input" style="flex: 2; font-size: 0.76rem;" placeholder="Part name (e.g. RP2040-Zero)...">
-            <input type="number" id="newBomItemQty" class="form-input" style="width: 55px; font-size: 0.76rem;" value="1" min="1">
-            <button id="btnAddBomItem" class="btn-action" style="padding: 0 10px; font-size: 0.76rem;">+ Add</button>
+          <div class="bom-add-row">
+            <input type="text" id="newBomItemName" class="form-input" placeholder="Part name (e.g. RP2040-Zero)…">
+            <input type="number" id="newBomItemQty" class="form-input" value="1" min="1" aria-label="Quantity">
+            <button id="btnAddBomItem" class="btn-action">+ Add</button>
           </div>
-          <input type="text" id="newBomItemNotes" class="form-input" style="font-size: 0.74rem; margin-bottom: 12px;" placeholder="Optional part notes / supplier link...">
+          <input type="text" id="newBomItemNotes" class="form-input" placeholder="Optional part notes / supplier link…">
 
-          <!-- BOM Items List -->
-          <div id="inspBomList" style="display: flex; flex-direction: column; gap: 6px;">
-            <div style="font-size: 0.78rem; color: var(--text-muted);">No components added yet.</div>
+          <div id="inspBomList" class="bom-list">
+            <div class="insp-hint">No components added yet.</div>
           </div>
         </div>
       </div>
 
-      <!-- ================= TAB 3: CONNECTIONS & SHARED PARTS ================= -->
+      <!-- ================= TAB 3: CONNECTIONS ================= -->
       <div id="tabConnections" class="insp-tab-pane">
-        <!-- Outgoing & Incoming Connections Lists -->
-        <div class="section-title">Connected Projects</div>
-        <div id="inspOutgoingList" class="conn-list" style="margin-bottom: 12px;">
-          <div style="font-size: 0.78rem; color: var(--text-muted);">No connections yet</div>
-        </div>
-
-        <!-- Multi-Hop Cascade Influence & Ripple Tree -->
-        <div class="cascade-section" style="margin-top: 14px; margin-bottom: 14px; border-top: 1px solid var(--border-glass); padding-top: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-weight: 700; font-size: 0.82rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-              <span>🌊</span> Multi-Hop Cascade Influence
-            </span>
-            <span id="cascadeHopsSummary" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.68rem; padding: 2px 8px; border-radius: 9999px;">0 Ripples</span>
+        <section class="insp-section">
+          <div class="section-title">Connected projects</div>
+          <div id="inspOutgoingList" class="conn-list">
+            <div class="insp-hint">No connections yet</div>
           </div>
-          <div id="inspCascadeContainer" class="cascade-tree-container">
-            <div style="font-size: 0.78rem; color: var(--text-muted);">Select a project to inspect its multi-hop cascade ripple.</div>
-          </div>
-        </div>
+        </section>
 
-        <!-- Connection Linker Card -->
-        <div class="create-link-card">
-          <div class="section-title" style="margin-bottom: 6px;">Link to Another Project</div>
+        <section class="insp-section">
+          <div class="section-title">Link to another project</div>
+          <div class="create-link-card">
+            <div class="form-row target-picker-wrapper">
+              <label class="form-label" for="targetSkillSearchInput">Target project</label>
+              <input type="text" id="targetSkillSearchInput" class="form-input" placeholder="Search project to link with…" autocomplete="off">
+              <div id="targetSearchResults" class="target-search-results"></div>
+              <div id="selectedTargetContainer" style="display: none; margin-top: 6px;"></div>
+            </div>
 
-          <div class="form-row target-picker-wrapper">
-            <label class="form-label">Target Project</label>
-            <input type="text" id="targetSkillSearchInput" class="form-input" placeholder="Search project to link with..." autocomplete="off">
-            <div id="targetSearchResults" class="target-search-results"></div>
-            <div id="selectedTargetContainer" style="display: none; margin-top: 6px;"></div>
-          </div>
-
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <div class="form-row" style="flex: 1;">
-              <label class="form-label">Relationship</label>
+            <div class="form-row">
+              <label class="form-label" for="linkRelationTypeSelect">Relationship</label>
               <select id="linkRelationTypeSelect" class="form-select">
-                <option value="shared_bom">⚡ Shared BOM Parts (Bulk-Buy)</option>
-                <option value="synergy">✨ Synergy & Integration</option>
-                <option value="depends_on">🔗 Depends On / Prerequisite</option>
-                <option value="subproject">📂 Sub-Project Module</option>
-                <option value="related">💡 Related Concept</option>
+                <option value="shared_bom">⚡ Shared BOM parts (bulk-buy)</option>
+                <option value="synergy">✨ Synergy &amp; integration</option>
+                <option value="related">💡 Related concept</option>
+                <option value="depends_on">🔗 Depends on (needs the target)</option>
+                <option value="subproject">📂 Has sub-project (target is part of this)</option>
               </select>
+              <div id="linkDirectionHint" class="link-direction-hint"></div>
             </div>
-            <div class="form-row" style="align-self: flex-end;">
-              <button id="btnAiProposeLink" class="btn-action" style="height: 36px; padding: 0 10px; font-size: 0.75rem;" title="AI Propose Connection Rationale">
-                ✨ AI Propose
-              </button>
+
+            <div class="form-row">
+              <label class="form-label" for="linkDescriptionInput">Connection notes / shared hardware</label>
+              <input type="text" id="linkDescriptionInput" class="form-input" placeholder="e.g. Both use 12V Noctua fans and barrel jacks…">
+            </div>
+
+            <div class="create-link-actions">
+              <button id="btnAiProposeLink" class="btn-action" title="Let the AI suggest the relationship and notes">✨ AI Propose</button>
+              <button id="btnEstablishLink" class="btn-action btn-primary" disabled>Establish Connection</button>
             </div>
           </div>
+        </section>
 
-          <div class="form-row">
-            <label class="form-label">Connection Notes / Shared Hardware</label>
-            <input type="text" id="linkDescriptionInput" class="form-input" placeholder="e.g. Both use 12V Noctua fan and barrel jacks...">
+        <section class="insp-section">
+          <div class="section-title insp-section-title-row">
+            <span>Network reach</span>
+            <span id="cascadeHopsSummary" class="insp-tab-count"></span>
           </div>
-
-          <button id="btnEstablishLink" class="btn-action btn-primary" style="width: 100%; justify-content: center;" disabled>
-            Establish Connection
-          </button>
-        </div>
+          <div id="inspCascadeContainer" class="cascade-tree-container"></div>
+        </section>
       </div>
 
       <!-- ================= TAB 4: AI SIMILARITIES ================= -->
       <div id="tabSimilarities" class="insp-tab-pane">
-        <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px;">
-          Similar projects detected by shared components, common tags, and category synergy:
-        </div>
+        <div class="insp-hint">Similar projects detected by shared components, common tags, and category synergy:</div>
         <div id="inspSimilaritiesList">
-          <div style="font-size: 0.78rem; color: var(--text-muted);">Analyzing similarities...</div>
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px;">
-        <button id="btnSaveAllChanges" class="btn-action btn-primary" style="width: 100%; justify-content: center;">Save All Changes to Markdown</button>
-        <div style="display: flex; gap: 8px;">
-          <button id="btnFocusNode" class="btn-action" style="flex: 1; justify-content: center;">Focus Camera</button>
-          <button id="btnDeleteIdea" class="btn-action" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4); justify-content: center;">Delete</button>
+          <div class="insp-hint">Analyzing similarities…</div>
         </div>
       </div>
     </div>
+
+    <footer class="insp-footer">
+      <span id="markdownSaveStatus" class="insp-save-status">All changes saved</span>
+      <button id="btnInspectorDeselectAll" class="btn-action btn-sm insp-deselect-btn" style="display: none;" title="Deselect all selected projects">Deselect all</button>
+      <button id="btnSaveAllChanges" class="btn-action btn-primary btn-sm" title="Save now (Ctrl+S). Changes are also saved automatically.">Save</button>
+    </footer>
   </aside>
 
   <!-- Consolidated Bill of Materials (BOM) Sourcing Modal -->
@@ -745,9 +723,9 @@
   <!-- Scripts -->
   <script src="vendor/3d-force-graph.min.js"></script>
   <script src="vendor/marked.min.js"></script>
-  <script src="js/graph3d.js?v=37"></script>
+  <script src="js/graph3d.js?v=38"></script>
   <script src="js/ai_modal.js?v=36"></script>
   <script src="js/chat.js?v=39"></script>
-  <script src="js/app.js?v=36"></script>
+  <script src="js/app.js?v=39"></script>
 </body>
 </html>

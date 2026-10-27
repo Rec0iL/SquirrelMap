@@ -4,6 +4,19 @@
  * category filtering, connection linking, and toast notifications.
  */
 
+const RELATION_LABELS = {
+  shared_bom: 'Shared BOM',
+  synergy: 'Synergy',
+  related: 'Related',
+  depends_on: 'Depends on',
+  subproject: 'Sub-project'
+};
+
+function escHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 class IdeaMindmapApp {
   constructor() {
     this.graph3d = null;
@@ -56,8 +69,20 @@ class IdeaMindmapApp {
     this.inspMarkdownPreview = document.getElementById('inspMarkdownPreview');
     this.btnMdEditMode = document.getElementById('btnMdEditMode');
     this.btnMdPreviewMode = document.getElementById('btnMdPreviewMode');
-    this.btnSaveMarkdownNotes = document.getElementById('btnSaveMarkdownNotes');
+    this.btnMdSplitMode = document.getElementById('btnMdSplitMode');
+    this.mdEditorContainer = document.getElementById('mdEditorContainer');
     this.markdownSaveStatus = document.getElementById('markdownSaveStatus');
+    this.inspectorResizeHandle = document.getElementById('inspectorResizeHandle');
+    this.btnInspectorWide = document.getElementById('btnInspectorWide');
+    this.inspBomCount = document.getElementById('inspBomCount');
+    this.inspConnCount = document.getElementById('inspConnCount');
+
+    // Unsaved inspector edits are saved automatically shortly after typing stops
+    this.inspDirty = false;
+    this.inspEditVersion = 0;
+    this.inspSaveTimer = null;
+    this.mdMode = this.loadPref('squirrelmap_notes_mode', 'read');
+    this.lastCategories = [];
     this.mdToolBtns = document.querySelectorAll('.md-tool-btn');
 
     // BOM
@@ -76,6 +101,7 @@ class IdeaMindmapApp {
     this.linkDescriptionInput = document.getElementById('linkDescriptionInput');
     this.btnAiProposeLink = document.getElementById('btnAiProposeLink');
     this.btnEstablishLink = document.getElementById('btnEstablishLink');
+    this.linkDirectionHint = document.getElementById('linkDirectionHint');
     this.selectedLinkTarget = null;
 
     // Synergies & Similarities
@@ -84,7 +110,6 @@ class IdeaMindmapApp {
     // Inspector Bottom Actions
     this.btnSaveAllChanges = document.getElementById('btnSaveAllChanges');
     this.btnFocusNode = document.getElementById('btnFocusNode');
-    this.btnDeleteIdea = document.getElementById('btnDeleteIdea');
     this.btnDeleteIdeaHeader = document.getElementById('btnDeleteIdeaHeader');
 
     // New Project Modal
@@ -124,7 +149,6 @@ class IdeaMindmapApp {
     this.btnDeselectAllNodes = document.getElementById('btnDeselectAllNodes');
     this.btnExitMultiSelect = document.getElementById('btnExitMultiSelect');
     this.btnToggleAddToSelection = document.getElementById('btnToggleAddToSelection');
-    this.btnToggleAddToSelectionText = document.getElementById('btnToggleAddToSelectionText');
     this.btnInspectorDeselectAll = document.getElementById('btnInspectorDeselectAll');
   }
 
@@ -190,23 +214,48 @@ class IdeaMindmapApp {
       });
     }
 
-    // Auto-save category and status on inspector change
-    if (this.inspCategoryInput) {
-      this.inspCategoryInput.addEventListener('change', () => {
-        if (this.selectedNode) {
-          this.selectedNode.category = this.inspCategoryInput.value.trim() || 'General';
-          this.saveAllCurrentNodeChanges();
-        }
+    // Inspector edits are tracked and saved automatically; status and category save right away
+    [this.inspTitleInput, this.inspTagsInput, this.inspCategoryInput, this.inspMarkdownTextarea].forEach(el => {
+      if (el) el.addEventListener('input', () => this.markInspectorDirty());
+    });
+    [this.inspStatusSelect, this.inspCategoryInput].forEach(el => {
+      if (el) el.addEventListener('change', () => {
+        this.markInspectorDirty();
+        this.saveCurrentNodeNotes();
+      });
+    });
+    if (this.inspMarkdownTextarea) {
+      this.inspMarkdownTextarea.addEventListener('input', () => {
+        if (this.mdMode !== 'split') return;
+        clearTimeout(this._previewTimer);
+        this._previewTimer = setTimeout(() => this.updateMarkdownPreview(), 200);
       });
     }
-    if (this.inspStatusSelect) {
-      this.inspStatusSelect.addEventListener('change', () => {
-        if (this.selectedNode) {
-          this.selectedNode.status = this.inspStatusSelect.value;
-          this.saveAllCurrentNodeChanges();
-        }
+    if (this.inspMarkdownPreview) {
+      this.inspMarkdownPreview.addEventListener('dblclick', () => {
+        if (this.mdMode === 'read') this.setMarkdownMode('edit');
+        if (this.inspMarkdownTextarea) this.inspMarkdownTextarea.focus();
       });
     }
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && this.selectedNode && this.inspectorPanel && this.inspectorPanel.classList.contains('open')) {
+        e.preventDefault();
+        this.saveCurrentNodeNotes();
+      }
+    });
+    window.addEventListener('beforeunload', () => {
+      // Last chance for edits typed less than a moment ago
+      if (this.inspDirty && this.selectedNode) {
+        this.collectInspectorEdits(this.selectedNode);
+        fetch('/api/ideas', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.ideaPayload(this.selectedNode))
+        });
+      }
+    });
+    this.setupInspectorResize();
 
     // Export Mindmap
     if (this.btnExportGraph) {
@@ -280,12 +329,9 @@ class IdeaMindmapApp {
     });
 
     // Markdown Editor Toolbar & Modes
-    if (this.btnMdEditMode) {
-      this.btnMdEditMode.addEventListener('click', () => this.setMarkdownMode('edit'));
-    }
-    if (this.btnMdPreviewMode) {
-      this.btnMdPreviewMode.addEventListener('click', () => this.setMarkdownMode('preview'));
-    }
+    [this.btnMdPreviewMode, this.btnMdEditMode, this.btnMdSplitMode].forEach(btn => {
+      if (btn) btn.addEventListener('click', () => this.setMarkdownMode(btn.getAttribute('data-mode')));
+    });
     this.mdToolBtns.forEach(btn => {
       btn.addEventListener('click', () => {
         const insert = btn.getAttribute('data-insert') || '';
@@ -293,11 +339,6 @@ class IdeaMindmapApp {
         this.insertMarkdownSyntax(insert, close);
       });
     });
-
-    // Markdown Notes Save
-    if (this.btnSaveMarkdownNotes) {
-      this.btnSaveMarkdownNotes.addEventListener('click', () => this.saveCurrentNodeNotes());
-    }
 
     // BOM Management
     if (this.btnAddBomItem) {
@@ -319,18 +360,21 @@ class IdeaMindmapApp {
     if (this.btnEstablishLink) {
       this.btnEstablishLink.addEventListener('click', () => this.establishConnection());
     }
+    if (this.linkRelationTypeSelect) {
+      this.linkRelationTypeSelect.addEventListener('change', () => this.updateLinkDirectionHint());
+    }
 
-    // Save All Changes & Focus & Delete
+    // Save, Wide View, Focus & Delete
     if (this.btnSaveAllChanges) {
-      this.btnSaveAllChanges.addEventListener('click', () => this.saveAllCurrentNodeChanges());
+      this.btnSaveAllChanges.addEventListener('click', () => this.saveCurrentNodeNotes());
+    }
+    if (this.btnInspectorWide) {
+      this.btnInspectorWide.addEventListener('click', () => this.toggleInspectorWide());
     }
     if (this.btnFocusNode) {
       this.btnFocusNode.addEventListener('click', () => {
         if (this.selectedNode) this.graph3d.focusOnNode(this.selectedNode.id);
       });
-    }
-    if (this.btnDeleteIdea) {
-      this.btnDeleteIdea.addEventListener('click', () => this.deleteCurrentIdea());
     }
     if (this.btnDeleteIdeaHeader) {
       this.btnDeleteIdeaHeader.addEventListener('click', () => this.deleteCurrentIdea());
@@ -381,7 +425,8 @@ class IdeaMindmapApp {
       if (this.statSharedBomCount) this.statSharedBomCount.textContent = data.shared_bom_count || 0;
 
       // Render Categories
-      this.renderCategoryPills(data.categories || []);
+      this.lastCategories = data.categories || [];
+      this.renderCategoryPills(this.lastCategories);
 
       // Feed into 3D graph
       this.graph3d.setData(this.allNodes, this.allEdges);
@@ -390,8 +435,9 @@ class IdeaMindmapApp {
       if (this.selectedNode) {
         const fresh = this.allNodes.find(n => n.id === this.selectedNode.id);
         if (fresh) {
-          this.onNodeSelected(fresh);
+          this.onNodeSelected(fresh); // keeps unsaved edits in the editor
         } else {
+          this.discardInspectorEdits(); // the project was deleted, e.g. by the agent
           this.closeInspector();
         }
       }
@@ -529,199 +575,254 @@ class IdeaMindmapApp {
       return;
     }
 
+    const switching = !this.selectedNode || this.selectedNode.id !== node.id;
+    if (switching) this.flushInspectorSave(); // save edits of the project being left
+
     this.selectedNode = node;
     this.openInspector();
 
-    // Fill Header
+    if (switching || !this.inspDirty) {
+      this.inspDirty = false;
+      this.fillInspectorFields(node);
+      if (switching) this.setSaveStatus('All changes saved', '');
+    } else {
+      // Refreshed data for the same project while the user is typing: keep their edits
+      this.collectInspectorEdits(node);
+    }
+
+    this.renderNodeBom(node.bom || []);
+    this.renderNodeConnections(node.id);
+    this.renderNetworkReach(node);
+    this.fetchAndRenderSimilarities(node.id);
+    this.updateMultiSelectUI();
+
+    if (switching) {
+      this.selectedLinkTarget = null;
+      if (this.selectedTargetContainer) this.selectedTargetContainer.style.display = 'none';
+      if (this.targetSkillSearchInput) this.targetSkillSearchInput.value = '';
+      if (this.btnEstablishLink) this.btnEstablishLink.disabled = true;
+    }
+    this.updateLinkDirectionHint();
+  }
+
+  fillInspectorFields(node) {
     if (this.inspStatusSelect) this.inspStatusSelect.value = node.status || 'concept';
     if (this.inspCategoryInput) this.inspCategoryInput.value = node.category || 'General';
     if (this.inspTitleInput) this.inspTitleInput.value = node.title || node.name || '';
     if (this.inspTagsInput) this.inspTagsInput.value = (node.tags || []).join(', ');
 
-    // Fill Markdown Editor
     if (this.inspMarkdownTextarea) {
-      this.inspMarkdownTextarea.value = node.content_markdown || `# ${node.title}\n\n${node.description}\n`;
+      const md = node.content_markdown || `# ${node.title}\n\n${node.description || ''}\n`;
+      // Leave cursor and scroll position alone when the note did not change
+      if (this.inspMarkdownTextarea.value !== md) {
+        this.inspMarkdownTextarea.value = md;
+        this.inspMarkdownTextarea.scrollTop = 0;
+        if (this.inspMarkdownPreview) this.inspMarkdownPreview.scrollTop = 0;
+      }
     }
-    this.updateMarkdownPreview();
-    this.setMarkdownMode('edit');
-
-    // Fill BOM
-    this.renderNodeBom(node.bom || []);
-
-    // Fill Connections
-    this.renderNodeConnections(node.id);
-
-    // Multi-Hop Cascade Influence
-    this.renderCascadeDistribution(node);
-
-    // Fetch and render similarities
-    this.fetchAndRenderSimilarities(node.id);
-
-    // Sync multi-select inspector buttons
-    this.updateMultiSelectUI();
-
-    // Reset Link Target
-    this.selectedLinkTarget = null;
-    if (this.selectedTargetContainer) this.selectedTargetContainer.style.display = 'none';
-    if (this.targetSkillSearchInput) this.targetSkillSearchInput.value = '';
-    if (this.btnEstablishLink) this.btnEstablishLink.disabled = true;
+    this.setMarkdownMode(this.mdMode);
   }
 
+  // ---- Inspector editing & saving ----
 
-  renderCascadeDistribution(node) {
+  loadPref(key, fallback) {
+    try {
+      return localStorage.getItem(key) || fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  savePref(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  setSaveStatus(text, state) {
+    if (!this.markdownSaveStatus) return;
+    this.markdownSaveStatus.textContent = text;
+    this.markdownSaveStatus.className = 'insp-save-status' + (state ? ' ' + state : '');
+  }
+
+  markInspectorDirty() {
+    if (!this.selectedNode) return;
+    this.inspDirty = true;
+    this.inspEditVersion++;
+    this.setSaveStatus('Unsaved changes…', 'dirty');
+    clearTimeout(this.inspSaveTimer);
+    this.inspSaveTimer = setTimeout(() => this.saveCurrentNodeNotes(), 1500);
+  }
+
+  discardInspectorEdits() {
+    clearTimeout(this.inspSaveTimer);
+    this.inspDirty = false;
+  }
+
+  /** Copies the inspector's form values onto a project object. */
+  collectInspectorEdits(node) {
+    if (this.inspTitleInput) node.title = this.inspTitleInput.value.trim() || node.title;
+    node.name = node.title;
+    if (this.inspCategoryInput) node.category = this.inspCategoryInput.value.trim() || node.category || 'General';
+    if (this.inspStatusSelect) node.status = this.inspStatusSelect.value;
+    if (this.inspTagsInput) {
+      const tagsStr = this.inspTagsInput.value.trim();
+      node.tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    }
+    if (this.inspMarkdownTextarea) node.content_markdown = this.inspMarkdownTextarea.value;
+  }
+
+  /** Only the idea's own fields: graph nodes also carry positions and 3D objects that must not be sent. */
+  ideaPayload(node) {
+    return {
+      id: node.id,
+      title: node.title,
+      name: node.title,
+      category: node.category || 'General',
+      status: node.status || 'concept',
+      description: node.description || '',
+      content_markdown: node.content_markdown || '',
+      tags: node.tags || [],
+      bom: (node.bom || []).map(b => ({ item: b.item, qty: b.qty || 1, notes: b.notes || '', link: b.link || '' })),
+      created_at: node.created_at || null
+    };
+  }
+
+  flushInspectorSave() {
+    if (this.inspDirty && this.selectedNode) this.saveCurrentNodeNotes();
+  }
+
+  /** Applies saved fields to the graph's copies of the project so labels and colors update without a reload. */
+  syncNodeToGraph(node) {
+    const fields = ['title', 'name', 'category', 'status', 'tags', 'content_markdown', 'bom'];
+    const copies = [this.allNodes.find(n => n.id === node.id)];
+    if (this.graph3d && this.graph3d.graph) {
+      copies.push(...this.graph3d.graph.graphData().nodes.filter(n => n.id === node.id));
+    }
+    copies.forEach(copy => {
+      if (copy && copy !== node) fields.forEach(f => { copy[f] = node[f]; });
+    });
+    if (this.graph3d) this.graph3d.refreshStyles();
+    if (node.category && !this.lastCategories.includes(node.category)) {
+      this.lastCategories = [...this.lastCategories, node.category].sort();
+      this.renderCategoryPills(this.lastCategories);
+    }
+  }
+
+  // ---- Inspector width ----
+
+  inspectorMaxWidth() {
+    return Math.max(380, window.innerWidth - 32 - 96); // keep a strip of the graph visible
+  }
+
+  applyInspectorWidth(width, persist = false) {
+    if (!this.inspectorPanel) return;
+    this.inspectorPreferredWidth = width;
+    const w = Math.round(Math.min(Math.max(width, 380), this.inspectorMaxWidth()));
+    this.inspectorPanel.style.setProperty('--insp-width', `${w}px`);
+    if (persist) this.savePref('squirrelmap_inspector_width', String(w));
+    if (this.btnInspectorWide) this.btnInspectorWide.setAttribute('aria-pressed', String(w >= 720));
+    this.updateMdModeButtons();
+    this.updateInspectorReservedSpace();
+  }
+
+  setupInspectorResize() {
+    if (!this.inspectorPanel) return;
+    this.applyInspectorWidth(parseInt(this.loadPref('squirrelmap_inspector_width', '480'), 10) || 480);
+    window.addEventListener('resize', () => this.applyInspectorWidth(this.inspectorPreferredWidth));
+    if (!this.inspectorResizeHandle) return;
+
+    this.inspectorResizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = this.inspectorPanel.offsetWidth;
+      this.inspectorPanel.classList.add('resizing');
+      const onMove = (ev) => this.applyInspectorWidth(startWidth + (startX - ev.clientX));
+      const onUp = () => {
+        this.inspectorPanel.classList.remove('resizing');
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        this.applyInspectorWidth(this.inspectorPanel.offsetWidth, true);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+    this.inspectorResizeHandle.addEventListener('dblclick', () => this.toggleInspectorWide());
+  }
+
+  toggleInspectorWide() {
+    if (!this.inspectorPanel) return;
+    if (this.inspectorPanel.offsetWidth >= 720) {
+      this.applyInspectorWidth(this.inspectorNarrowWidth || 480, true);
+      if (this.mdMode === 'split') this.setMarkdownMode('edit');
+    } else {
+      this.inspectorNarrowWidth = this.inspectorPanel.offsetWidth;
+      this.applyInspectorWidth(1100, true);
+      if (this.mdMode === 'edit') this.setMarkdownMode('split');
+    }
+  }
+
+  /** Projects 2-3 connections away from this one (direct connections are listed above). */
+  renderNetworkReach(node) {
     const container = document.getElementById('inspCascadeContainer');
-    const summaryBadge = document.getElementById('cascadeHopsSummary');
+    const summary = document.getElementById('cascadeHopsSummary');
     if (!container) return;
 
-    container.innerHTML = '';
-
-    const downstream = this.graph3d.cascadeDownstreamHops || {};
-    const upstream = this.graph3d.cascadeUpstreamHops || {};
-
-    const hopGroups = { 1: [], 2: [], 3: [] };
-    let totalDownstream = 0;
-
-    Object.entries(downstream).forEach(([nid, info]) => {
-      if (nid === node.id) return;
-      const targetNode = this.allNodes.find(n => n.id === nid);
-      if (!targetNode) return;
-      const hop = info.hop;
-      totalDownstream++;
-      if (hop === 1) hopGroups[1].push({ node: targetNode, transfer: info.transfer });
-      else if (hop === 2) hopGroups[2].push({ node: targetNode, transfer: info.transfer });
-      else hopGroups[3].push({ node: targetNode, transfer: info.transfer, hop });
+    if (this.graph3d && this.graph3d.computeReach) this.graph3d.computeReach(node.id);
+    const hops = (this.graph3d && this.graph3d.reachHops) || {};
+    const groups = { 2: [], 3: [] };
+    Object.entries(hops).forEach(([id, hop]) => {
+      const other = groups[hop] && this.allNodes.find(n => n.id === id);
+      if (other) groups[hop].push(other);
     });
+    const total = groups[2].length + groups[3].length;
+    if (summary) summary.textContent = total ? String(total) : '';
 
-    const upstreamList = [];
-    Object.entries(upstream).forEach(([nid, info]) => {
-      if (nid === node.id) return;
-      const sourceNode = this.allNodes.find(n => n.id === nid);
-      if (sourceNode) upstreamList.push({ node: sourceNode, hop: info.hop });
-    });
-
-    if (summaryBadge) {
-      summaryBadge.textContent = `${totalDownstream} Cascade Ripples`;
-    }
-
-    if (totalDownstream === 0 && upstreamList.length === 0) {
-      container.innerHTML = `<div style="font-size: 0.78rem; color: var(--text-muted);">No multi-hop ripples detected for this project.</div>`;
+    if (total === 0) {
+      container.innerHTML = '<div class="insp-hint">No projects 2–3 connections away.</div>';
       return;
     }
 
-    // Render Hop 1
-    if (hopGroups[1].length > 0) {
-      const g = document.createElement('div');
-      g.className = 'cascade-hop-group';
-      g.innerHTML = `
-        <div class="cascade-hop-header hop-1">
-          <span>⚡ Direct Reach (Hop 1)</span>
-          <span>${hopGroups[1].length} projects</span>
+    container.innerHTML = [2, 3].filter(h => groups[h].length).map(h => `
+      <div class="cascade-hop-group">
+        <div class="cascade-hop-header hop-${h}">
+          <span>${h} connections away</span>
+          <span>${groups[h].length} project${groups[h].length === 1 ? '' : 's'}</span>
         </div>
         <div class="cascade-cards-grid">
-          ${hopGroups[1].map(item => `
-            <div class="cascade-node-card" data-id="${item.node.id}" title="${item.node.title || item.node.name}">
-              <span class="cascade-node-name">${item.node.title || item.node.name}</span>
-              <span class="cascade-flow-pct hop-1">${Math.round((item.transfer || 0.8) * 100)}% Synergy</span>
+          ${groups[h].map(n => `
+            <div class="cascade-node-card" data-id="${escHtml(n.id)}" title="${escHtml(n.title || n.name)}">
+              <span class="cascade-node-name">${escHtml(n.title || n.name)}</span>
             </div>
           `).join('')}
         </div>
-      `;
-      g.querySelectorAll('.cascade-node-card').forEach(card => {
-        card.addEventListener('click', () => {
-          this.graph3d.focusOnNode(card.getAttribute('data-id'));
-        });
-      });
-      container.appendChild(g);
-    }
-
-    // Render Hop 2
-    if (hopGroups[2].length > 0) {
-      const g = document.createElement('div');
-      g.className = 'cascade-hop-group';
-      g.innerHTML = `
-        <div class="cascade-hop-header hop-2">
-          <span>🌿 Secondary Ripple (Hop 2)</span>
-          <span>${hopGroups[2].length} projects</span>
-        </div>
-        <div class="cascade-cards-grid">
-          ${hopGroups[2].map(item => `
-            <div class="cascade-node-card" data-id="${item.node.id}" title="${item.node.title || item.node.name}">
-              <span class="cascade-node-name">${item.node.title || item.node.name}</span>
-              <span class="cascade-flow-pct hop-2">${Math.round((item.transfer || 0.6) * 100)}% Synergy</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
-      g.querySelectorAll('.cascade-node-card').forEach(card => {
-        card.addEventListener('click', () => {
-          this.graph3d.focusOnNode(card.getAttribute('data-id'));
-        });
-      });
-      container.appendChild(g);
-    }
-
-    // Render Hop 3+
-    if (hopGroups[3].length > 0) {
-      const g = document.createElement('div');
-      g.className = 'cascade-hop-group';
-      g.innerHTML = `
-        <div class="cascade-hop-header hop-3">
-          <span>✨ Extended Cascade (Hop 3+)</span>
-          <span>${hopGroups[3].length} projects</span>
-        </div>
-        <div class="cascade-cards-grid">
-          ${hopGroups[3].map(item => `
-            <div class="cascade-node-card" data-id="${item.node.id}" title="${item.node.title || item.node.name}">
-              <span class="cascade-node-name">${item.node.title || item.node.name}</span>
-              <span class="cascade-flow-pct hop-3">${Math.round((item.transfer || 0.4) * 100)}% Synergy</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
-      g.querySelectorAll('.cascade-node-card').forEach(card => {
-        card.addEventListener('click', () => {
-          this.graph3d.focusOnNode(card.getAttribute('data-id'));
-        });
-      });
-      container.appendChild(g);
-    }
-
-    // Render Upstream
-    if (upstreamList.length > 0) {
-      const g = document.createElement('div');
-      g.className = 'cascade-hop-group';
-      g.innerHTML = `
-        <div class="cascade-hop-header hop-upstream">
-          <span>🏛️ Foundational Roots</span>
-          <span>${upstreamList.length} projects</span>
-        </div>
-        <div class="cascade-cards-grid">
-          ${upstreamList.map(item => `
-            <div class="cascade-node-card" data-id="${item.node.id}" title="${item.node.title || item.node.name}">
-              <span class="cascade-node-name">${item.node.title || item.node.name}</span>
-              <span class="cascade-flow-pct hop-upstream">Root Feeder</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
-      g.querySelectorAll('.cascade-node-card').forEach(card => {
-        card.addEventListener('click', () => {
-          this.graph3d.focusOnNode(card.getAttribute('data-id'));
-        });
-      });
-      container.appendChild(g);
-    }
+      </div>
+    `).join('');
+    container.querySelectorAll('.cascade-node-card').forEach(card => {
+      card.addEventListener('click', () => this.graph3d.focusOnNode(card.getAttribute('data-id')));
+    });
   }
 
   openInspector() {
     if (this.inspectorPanel) this.inspectorPanel.classList.add('open');
+    this.updateInspectorReservedSpace();
+  }
+
+  /** Tells the view toolbar how much room the open inspector takes, so it wraps instead of covering it. */
+  updateInspectorReservedSpace() {
+    const open = this.inspectorPanel && this.inspectorPanel.classList.contains('open');
+    const reserved = open ? this.inspectorPanel.offsetWidth + 32 : 0;
+    document.documentElement.style.setProperty('--insp-reserved', `${reserved}px`);
   }
 
   closeInspector(deselectGraph = true) {
     if (this._isClosingInspector) return;
     this._isClosingInspector = true;
     try {
+      this.flushInspectorSave();
+      this.inspDirty = false;
       if (this.inspectorPanel) this.inspectorPanel.classList.remove('open');
+      this.updateInspectorReservedSpace();
       this.selectedNode = null;
       if (deselectGraph && this.graph3d && !this.isMultiSelectMode) {
         this.graph3d.clearSelection(false);
@@ -794,23 +895,30 @@ class IdeaMindmapApp {
   }
 
   setMarkdownMode(mode) {
-    if (mode === 'preview') {
-      this.updateMarkdownPreview();
-      if (this.inspMarkdownTextarea) this.inspMarkdownTextarea.style.display = 'none';
-      if (this.inspMarkdownPreview) this.inspMarkdownPreview.style.display = 'block';
-      if (this.btnMdPreviewMode) this.btnMdPreviewMode.classList.add('active');
-      if (this.btnMdEditMode) this.btnMdEditMode.classList.remove('active');
-    } else {
-      if (this.inspMarkdownTextarea) this.inspMarkdownTextarea.style.display = 'block';
-      if (this.inspMarkdownPreview) this.inspMarkdownPreview.style.display = 'none';
-      if (this.btnMdEditMode) this.btnMdEditMode.classList.add('active');
-      if (this.btnMdPreviewMode) this.btnMdPreviewMode.classList.remove('active');
-    }
+    if (!['read', 'edit', 'split'].includes(mode)) mode = 'read';
+    this.mdMode = mode;
+    this.savePref('squirrelmap_notes_mode', mode);
+    if (this.mdEditorContainer) this.mdEditorContainer.className = `md-editor-container mode-${mode}`;
+    if (mode !== 'edit') this.updateMarkdownPreview();
+    this.updateMdModeButtons();
+  }
+
+  updateMdModeButtons() {
+    // A narrow panel cannot show split view; it then works (and is shown) as edit
+    const narrow = this.inspectorPanel && this.inspectorPanel.offsetWidth > 0 && this.inspectorPanel.offsetWidth < 720;
+    const shown = this.mdMode === 'split' && narrow ? 'edit' : this.mdMode;
+    [this.btnMdPreviewMode, this.btnMdEditMode, this.btnMdSplitMode].forEach(btn => {
+      if (btn) btn.classList.toggle('active', btn.getAttribute('data-mode') === shown);
+    });
   }
 
   updateMarkdownPreview() {
     if (!this.inspMarkdownPreview || !this.inspMarkdownTextarea) return;
     const raw = this.inspMarkdownTextarea.value || '';
+    if (!raw.trim()) {
+      this.inspMarkdownPreview.innerHTML = '<p class="md-preview-empty">No notes yet. Double-click here or press Edit to start writing.</p>';
+      return;
+    }
     if (window.marked && typeof marked.parse === 'function') {
       this.inspMarkdownPreview.innerHTML = marked.parse(raw);
     } else {
@@ -831,49 +939,57 @@ class IdeaMindmapApp {
     el.focus();
     el.selectionStart = start + insert.length;
     el.selectionEnd = start + insert.length + sel.length;
+    this.markInspectorDirty();
+    if (this.mdMode === 'split') this.updateMarkdownPreview();
   }
 
   async saveCurrentNodeNotes() {
-    if (!this.selectedNode) return;
+    const node = this.selectedNode;
+    if (!node) return false;
+    clearTimeout(this.inspSaveTimer);
 
-    if (this.inspTitleInput) this.selectedNode.title = this.inspTitleInput.value.trim() || this.selectedNode.title;
-    if (this.inspCategoryInput) this.selectedNode.category = this.inspCategoryInput.value.trim() || this.selectedNode.category || 'General';
-    if (this.inspStatusSelect) this.selectedNode.status = this.inspStatusSelect.value;
-    if (this.inspTagsInput) {
-      const tagsStr = this.inspTagsInput.value.trim();
-      this.selectedNode.tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
-    }
-
-    const rawMarkdown = this.inspMarkdownTextarea ? this.inspMarkdownTextarea.value : '';
-    if (this.markdownSaveStatus) this.markdownSaveStatus.textContent = 'Saving...';
-
-    this.selectedNode.content_markdown = rawMarkdown;
+    // Read the form now: the user may switch projects before the request finishes
+    this.collectInspectorEdits(node);
+    const payload = this.ideaPayload(node);
+    const version = this.inspEditVersion;
+    const isShown = () => this.selectedNode && this.selectedNode.id === node.id;
+    this.setSaveStatus('Saving…', 'dirty');
 
     try {
       const resp = await fetch('/api/ideas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(this.selectedNode)
+        body: JSON.stringify(payload)
       });
-      const res = await resp.json();
-
-      if (res.success) {
-        if (this.markdownSaveStatus) this.markdownSaveStatus.textContent = 'Saved to ideas/' + this.selectedNode.id + '.md';
-        this.showToast('Markdown notes saved!', 'success');
-      } else {
-        if (this.markdownSaveStatus) this.markdownSaveStatus.textContent = 'Save failed';
+      const res = await resp.json().catch(() => ({}));
+      if (!resp.ok || !res.success) {
+        throw new Error(res.detail ? JSON.stringify(res.detail).slice(0, 160) : `HTTP ${resp.status}`);
       }
+
+      if (isShown()) {
+        if (this.inspEditVersion === version) {
+          this.inspDirty = false;
+          const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          this.setSaveStatus(`Saved to ${node.id}.md · ${time}`, 'saved');
+        } else {
+          this.setSaveStatus('Unsaved changes…', 'dirty');
+        }
+      }
+      this.syncNodeToGraph(node);
+      return true;
     } catch (err) {
-      if (this.markdownSaveStatus) this.markdownSaveStatus.textContent = 'Error saving';
-      this.showToast(err.message, 'error');
+      if (isShown()) this.setSaveStatus(`Save failed: ${err.message}`, 'error');
+      this.showToast(`Could not save "${node.title}": ${err.message}`, 'error');
+      return false;
     }
   }
 
   renderNodeBom(bomItems) {
     if (!this.inspBomList) return;
+    if (this.inspBomCount) this.inspBomCount.textContent = (bomItems && bomItems.length) ? String(bomItems.length) : '';
 
     if (!bomItems || bomItems.length === 0) {
-      this.inspBomList.innerHTML = '<div style="font-size: 0.78rem; color: var(--text-muted);">No components listed yet.</div>';
+      this.inspBomList.innerHTML = '<div class="insp-hint">No components listed yet.</div>';
       return;
     }
 
@@ -883,9 +999,9 @@ class IdeaMindmapApp {
           <div class="bom-item-info">
             <div class="bom-item-title">
               <span class="bom-qty-chip">x${b.qty || 1}</span>
-              ${b.item}
+              ${escHtml(b.item)}
             </div>
-            ${b.notes ? `<div class="bom-item-notes">${b.notes}</div>` : ''}
+            ${b.notes ? `<div class="bom-item-notes">${escHtml(b.notes)}</div>` : ''}
           </div>
           <button class="panel-close-btn btn-delete-bom" data-idx="${idx}" title="Remove Part" style="width: 24px; height: 24px;">×</button>
         </div>
@@ -930,73 +1046,82 @@ class IdeaMindmapApp {
   renderNodeConnections(nodeId) {
     if (!this.inspOutgoingList) return;
 
-    const outgoing = this.allEdges.filter(e => {
-      const src = typeof e.source === 'object' ? e.source.id : e.source;
-      return src === nodeId;
+    // One card per connected project: links stored in both directions (A->B and B->A) are one connection
+    const endId = end => (typeof end === 'object' ? end.id : end);
+    const byProject = new Map();
+    this.allEdges.forEach(e => {
+      const src = endId(e.source);
+      const tgt = endId(e.target);
+      if (src !== nodeId && tgt !== nodeId) return;
+      const otherId = src === nodeId ? tgt : src;
+      if (!byProject.has(otherId)) byProject.set(otherId, []);
+      byProject.get(otherId).push({ e, isSource: src === nodeId });
     });
-    const incoming = this.allEdges.filter(e => {
-      const tgt = typeof e.target === 'object' ? e.target.id : e.target;
-      return tgt === nodeId;
-    });
+    if (this.inspConnCount) this.inspConnCount.textContent = byProject.size ? String(byProject.size) : '';
 
-    const conns = [...outgoing, ...incoming];
-
-    if (conns.length === 0) {
-      this.inspOutgoingList.innerHTML = '<div style="font-size: 0.78rem; color: var(--text-muted);">No connections yet</div>';
+    if (byProject.size === 0) {
+      this.inspOutgoingList.innerHTML = '<div class="insp-hint">No connections yet. Link a project below or check the Synergies tab.</div>';
       return;
     }
 
-    const html = conns.map(e => {
-      const srcId = typeof e.source === 'object' ? e.source.id : e.source;
-      const tgtId = typeof e.target === 'object' ? e.target.id : e.target;
-      const isOutgoing = srcId === nodeId;
-      const otherId = isOutgoing ? tgtId : srcId;
-      const otherNode = this.allNodes.find(n => n.id === otherId);
-      const otherTitle = otherNode ? otherNode.title : otherId;
+    const colors = (this.graph3d && this.graph3d.edgeColors) || {};
+    const unique = list => [...new Set(list.filter(Boolean))];
+    this.inspOutgoingList.innerHTML = [...byProject.entries()].map(([otherId, links]) => {
+      const other = this.allNodes.find(n => n.id === otherId);
+      const otherTitle = other ? (other.title || other.name) : otherId;
+      const types = unique(links.map(l => l.e.relation_type || 'related'));
 
-      const isShared = e.relation_type === 'shared_bom' || (e.shared_parts && e.shared_parts.length);
-      const badgeStyle = isShared 
-        ? 'background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3);'
-        : 'background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);';
-
-      const sharedPartsStr = (e.shared_parts && e.shared_parts.length) 
-        ? `<div style="font-size: 0.70rem; color: #38bdf8; margin-top: 2px;">⚡ Shared: ${e.shared_parts.join(', ')}</div>` 
-        : '';
+      // Direction only means something for these two relations
+      const directions = unique(links.map(({ e, isSource }) => {
+        if (e.relation_type === 'depends_on') return isSource ? 'this project depends on it' : 'it depends on this project';
+        if (e.relation_type === 'subproject') return isSource ? 'it is a sub-project of this one' : 'this is a sub-project of it';
+        return '';
+      }));
+      const descriptions = unique(links.map(l => l.e.description));
+      const parts = unique(links.flatMap(l => l.e.shared_parts || [])).join(', ');
 
       return `
-        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); border-radius: 6px; padding: 6px 10px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <div style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; cursor: pointer;" class="conn-jump" data-target="${otherId}">
-              ${isOutgoing ? '→' : '←'} ${otherTitle}
+        <div class="conn-item" style="--conn-color: ${colors[types[0]] || '#64748b'};">
+          <span class="conn-item-stripe"></span>
+          <div class="conn-item-main">
+            <button class="conn-item-title conn-jump" data-target="${escHtml(otherId)}" title="Open this project">${escHtml(otherTitle)}</button>
+            <div class="conn-item-meta">
+              ${types.map(t => `<span class="conn-type-badge" style="--conn-color: ${colors[t] || '#64748b'};">${RELATION_LABELS[t] || escHtml(t)}</span>`).join('')}
+              ${directions.map(d => `<span>${d}</span>`).join('')}
             </div>
-            <span style="font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; ${badgeStyle}">
-              ${e.relation_type.replace('_', ' ').toUpperCase()}
-            </span>
-            ${sharedPartsStr}
+            ${descriptions.map(d => `<div class="conn-item-desc">${escHtml(d)}</div>`).join('')}
+            ${parts ? `<div class="conn-item-parts">⚡ Shared: ${escHtml(parts)}</div>` : ''}
           </div>
-          <button class="panel-close-btn btn-delete-edge" data-src="${srcId}" data-tgt="${tgtId}" title="Delete Link">×</button>
+          <button class="panel-icon-btn btn-delete-edge" data-other="${escHtml(otherId)}" title="Remove this connection">
+            <svg style="width: 14px; height: 14px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
         </div>
       `;
     }).join('');
 
-    this.inspOutgoingList.innerHTML = html;
-
-    // Jump to connected node on click
     this.inspOutgoingList.querySelectorAll('.conn-jump').forEach(elem => {
-      elem.addEventListener('click', () => {
-        const tgt = elem.getAttribute('data-target');
-        this.graph3d.focusOnNode(tgt);
-      });
+      elem.addEventListener('click', () => this.graph3d.focusOnNode(elem.getAttribute('data-target')));
     });
-
-    // Delete edge
     this.inspOutgoingList.querySelectorAll('.btn-delete-edge').forEach(btn => {
+      // The backend removes the link in both directions
       btn.addEventListener('click', async () => {
-        const src = btn.getAttribute('data-src');
-        const tgt = btn.getAttribute('data-tgt');
-        await this.deleteConnection(src, tgt);
+        await this.deleteConnection(nodeId, btn.getAttribute('data-other'));
       });
     });
+  }
+
+  updateLinkDirectionHint() {
+    if (!this.linkDirectionHint || !this.linkRelationTypeSelect) return;
+    const here = this.selectedNode ? `"${this.selectedNode.title}"` : 'This project';
+    const target = this.selectedLinkTarget ? `"${this.selectedLinkTarget.title}"` : 'the target';
+    const type = this.linkRelationTypeSelect.value;
+    if (type === 'depends_on') {
+      this.linkDirectionHint.textContent = `${here} depends on ${target}. The graph shows an arrow towards ${target}.`;
+    } else if (type === 'subproject') {
+      this.linkDirectionHint.textContent = `${target} becomes a sub-project of ${here}. The graph shows an arrow towards ${target}.`;
+    } else {
+      this.linkDirectionHint.textContent = 'Works both ways, no direction.';
+    }
   }
 
   async fetchAndRenderSimilarities(nodeId) {
@@ -1118,7 +1243,7 @@ class IdeaMindmapApp {
       this.selectedTargetContainer.style.display = 'block';
       this.selectedTargetContainer.innerHTML = `
         <div style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 0.8rem; font-weight: 600; color: #38bdf8;">🎯 Target: ${target.title}</span>
+          <span style="font-size: 0.8rem; font-weight: 600; color: #38bdf8; min-width: 0; overflow-wrap: anywhere;">🎯 Target: ${escHtml(target.title)}</span>
           <button class="panel-close-btn" id="btnClearTarget" style="width: 20px; height: 20px;">×</button>
         </div>
       `;
@@ -1126,10 +1251,12 @@ class IdeaMindmapApp {
         this.selectedLinkTarget = null;
         this.selectedTargetContainer.style.display = 'none';
         this.btnEstablishLink.disabled = true;
+        this.updateLinkDirectionHint();
       });
     }
 
     if (this.btnEstablishLink) this.btnEstablishLink.disabled = false;
+    this.updateLinkDirectionHint();
   }
 
   async proposeAiLink() {
@@ -1154,6 +1281,7 @@ class IdeaMindmapApp {
       const data = await resp.json();
 
       if (data.relation_type) this.linkRelationTypeSelect.value = data.relation_type;
+      this.updateLinkDirectionHint();
       if (data.description) this.linkDescriptionInput.value = data.description;
       this.showToast('AI proposed connection details!', 'success');
     } catch (err) {
@@ -1209,7 +1337,7 @@ class IdeaMindmapApp {
       }
       if (this.selectedNode) {
         this.renderNodeConnections(this.selectedNode.id);
-        this.renderCascadeDistribution(this.selectedNode);
+        this.renderNetworkReach(this.selectedNode);
       }
 
       const resp = await fetch(`/api/edges?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`, {
@@ -1219,10 +1347,6 @@ class IdeaMindmapApp {
       if (res.success) {
         this.showToast('Connection deleted.', 'info');
         await this.loadGraphData();
-        if (this.selectedNode) {
-          this.renderNodeConnections(this.selectedNode.id);
-          this.renderCascadeDistribution(this.selectedNode);
-        }
       } else {
         this.showToast('Failed to delete connection.', 'error');
         await this.loadGraphData();
@@ -1232,22 +1356,6 @@ class IdeaMindmapApp {
       this.showToast(err.message, 'error');
       await this.loadGraphData();
     }
-  }
-
-  async saveAllCurrentNodeChanges() {
-    if (!this.selectedNode) return;
-
-    this.selectedNode.title = this.inspTitleInput.value.trim() || this.selectedNode.title;
-    this.selectedNode.category = this.inspCategoryInput.value.trim() || 'General';
-    this.selectedNode.status = this.inspStatusSelect.value;
-    this.selectedNode.content_markdown = this.inspMarkdownTextarea.value;
-
-    const tagsStr = this.inspTagsInput.value.trim();
-    this.selectedNode.tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
-
-    await this.saveCurrentNodeNotes();
-    await this.loadGraphData();
-    this.showToast('All changes saved to ' + this.selectedNode.id + '.md', 'success');
   }
 
   async deleteCurrentIdea() {
@@ -1267,6 +1375,7 @@ class IdeaMindmapApp {
     });
 
     if (!confirmed) return;
+    this.discardInspectorEdits();
 
     try {
       // 1. Optimistic removal from 3D scene & state
@@ -1549,14 +1658,10 @@ class IdeaMindmapApp {
     }
 
     // Inspector Add to Selection button
-    if (this.btnToggleAddToSelection && this.btnToggleAddToSelectionText) {
-      if (this.selectedNode && this.selectedNodeIds.has(this.selectedNode.id)) {
-        this.btnToggleAddToSelectionText.textContent = 'Remove from Selection';
-        this.btnToggleAddToSelection.classList.add('active-cyan');
-      } else {
-        this.btnToggleAddToSelectionText.textContent = 'Add to Selection';
-        this.btnToggleAddToSelection.classList.remove('active-cyan');
-      }
+    if (this.btnToggleAddToSelection) {
+      const inSelection = !!(this.selectedNode && this.selectedNodeIds.has(this.selectedNode.id));
+      this.btnToggleAddToSelection.setAttribute('aria-pressed', String(inSelection));
+      this.btnToggleAddToSelection.title = inSelection ? 'Remove from multi-selection' : 'Add to multi-selection';
     }
     if (this.btnInspectorDeselectAll) {
       this.btnInspectorDeselectAll.style.display = (count > 0) ? 'inline-flex' : 'none';

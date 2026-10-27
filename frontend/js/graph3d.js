@@ -1,8 +1,8 @@
 /**
  * graph3d.js - 3D Force-Directed Graph Controller for Creative Idea Mindmap (SquirrelMap)
- * Features: OrbitControls, Auto-Rotation, BOM & Degree-based sizing, Multi-Hop Cascade Influence,
+ * Features: OrbitControls, Auto-Rotation, BOM & Degree-based sizing, network reach of the selected project,
  * Multiple layout modes (Galaxy, Radial Burst, Pyramid Hierarchy, Inverted Tree, 2D Mindmap),
- * and Category/Status/Cascade coloring.
+ * and Category/Status/Reach coloring.
  */
 
 class IdeaGraph3D {
@@ -21,14 +21,13 @@ class IdeaGraph3D {
     this.selectedNodeIds = new Set();
     this.onMultiSelectChangeCallback = null;
 
-    // Multi-hop cascade state
-    this.cascadeDownstreamHops = {}; // id -> { hop, transfer }
-    this.cascadeUpstreamHops = {};   // id -> { hop }
-    this.cascadeEdgeHops = {};       // "src->tgt" -> { hop, direction }
+    // Network reach of the selected project (connections count in both directions)
+    this.reachHops = {};      // id -> hop distance from the selected project
+    this.reachEdgeHops = {};  // "src->tgt" -> hop distance of the edge's farther end
 
     // Sizing & Coloring modes
     this.nodeSizeMode = 'degree'; // 'degree' | 'pagerank' | 'bom' | 'uniform'
-    this.nodeColorMode = 'category'; // 'category' | 'status' | 'degree' | 'cascade'
+    this.nodeColorMode = 'category'; // 'category' | 'status' | 'degree' | 'reach'
     this.layoutMode = 'galaxy'; // 'galaxy' | 'pyramid' | 'radial' | 'inverted' | '2d'
 
     // Category Color Palette
@@ -85,16 +84,22 @@ class IdeaGraph3D {
       .linkTarget('target')
       .linkColor(link => this.getLinkColor(link))
       .linkWidth(link => this.getLinkWidth(link))
-      .linkDirectionalParticles(link => this.getLinkParticles(link))
-      .linkDirectionalParticleSpeed(link => this.getLinkParticleSpeed(link))
-      .linkDirectionalParticleWidth(link => this.getLinkParticleWidth(link))
-      .linkDirectionalParticleColor(link => this.getLinkParticleColor(link))
+      // Only "depends on" and "sub-project" links have a direction; they get a static arrowhead at the target
+      .linkDirectionalArrowLength(link => this.isDirectedLink(link) ? 6 : 0)
+      .linkDirectionalArrowRelPos(1)
+      .linkDirectionalArrowColor(link => this.getLinkColor(link))
       .linkLabel(link => {
         const typeBadge = link.relation_type === 'shared_bom' ? '⚡ Shared BOM' : (link.relation_type || 'related').replace('_', ' ').toUpperCase();
         const sharedText = (link.shared_parts && link.shared_parts.length) ? `<br><span style="color: #38bdf8;">Parts: ${link.shared_parts.join(', ')}</span>` : '';
+        let directionText = '';
+        if (this.isDirectedLink(link)) {
+          const title = end => (typeof end === 'object' ? (end.title || end.name || end.id) : end);
+          const verb = link.relation_type === 'depends_on' ? 'depends on' : 'has sub-project';
+          directionText = `<div style="color: #e2e8f0; margin-top: 2px;">${title(link.source)} ${verb} ${title(link.target)}</div>`;
+        }
         return `
           <div style="background: rgba(15, 23, 42, 0.9); padding: 6px 10px; border-radius: 6px; font-size: 11px; border: 1px solid rgba(255,255,255,0.1);">
-            <strong>${typeBadge}</strong>${sharedText}
+            <strong>${typeBadge}</strong>${directionText}${sharedText}
             ${link.description ? `<div style="color: #94a3b8; font-size: 10px; margin-top: 2px;">${link.description}</div>` : ''}
           </div>
         `;
@@ -116,80 +121,48 @@ class IdeaGraph3D {
     this.setupWindowResize();
   }
 
-  // Multi-Hop Cascade Graph Traversal (Hops 1 to 4)
-  computeCascadeHops(rootId) {
-    if (!rootId) {
-      this.cascadeDownstreamHops = {};
-      this.cascadeUpstreamHops = {};
-      this.cascadeEdgeHops = {};
-      return;
-    }
+  // Hop distance from the selected project over its connections. Links are followed both ways:
+  // for most relation types the stored direction only records which project was open when linking.
+  computeReach(rootId) {
+    this.reachHops = {};
+    this.reachEdgeHops = {};
+    if (!rootId) return;
 
-    const downstream = {};
-    const upstream = {};
-    const edgeHops = {};
-
-    const outgoingAdj = {};
-    const incomingAdj = {};
-
-    this.rawEdges.forEach(e => {
-      const s = typeof e.source === 'object' ? e.source.id : e.source;
-      const t = typeof e.target === 'object' ? e.target.id : e.target;
-      if (!outgoingAdj[s]) outgoingAdj[s] = [];
-      outgoingAdj[s].push({ target: t, weight: e.weight || 0.8, relation: e.relation_type });
-      if (!incomingAdj[t]) incomingAdj[t] = [];
-      incomingAdj[t].push({ source: s, weight: e.weight || 0.8, relation: e.relation_type });
+    const MAX_HOPS = 3;
+    const adjacency = {};
+    const ends = this.rawEdges.map(e => [
+      typeof e.source === 'object' ? e.source.id : e.source,
+      typeof e.target === 'object' ? e.target.id : e.target
+    ]);
+    ends.forEach(([s, t]) => {
+      (adjacency[s] = adjacency[s] || []).push(t);
+      (adjacency[t] = adjacency[t] || []).push(s);
     });
 
-    // Downstream BFS (Direct Reach & Secondary Ripples)
-    const queue = [{ id: rootId, hop: 0, transfer: 1.0 }];
-    downstream[rootId] = { hop: 0, transfer: 1.0 };
-    const MAX_HOPS = 4;
-
+    this.reachHops[rootId] = 0;
+    const queue = [rootId];
     while (queue.length > 0) {
-      const { id, hop, transfer } = queue.shift();
+      const id = queue.shift();
+      const hop = this.reachHops[id];
       if (hop >= MAX_HOPS) continue;
-
-      const edges = outgoingAdj[id] || [];
-      for (const edge of edges) {
-        const nextHop = hop + 1;
-        const edgeKey = `${id}->${edge.target}`;
-        if (!edgeHops[edgeKey]) {
-          edgeHops[edgeKey] = { hop: nextHop, direction: 'outgoing' };
-        }
-
-        const nextTransfer = transfer * edge.weight;
-        if (!downstream[edge.target] || downstream[edge.target].hop > nextHop) {
-          downstream[edge.target] = { hop: nextHop, transfer: nextTransfer };
-          queue.push({ id: edge.target, hop: nextHop, transfer: nextTransfer });
+      for (const other of adjacency[id] || []) {
+        if (this.reachHops[other] === undefined) {
+          this.reachHops[other] = hop + 1;
+          queue.push(other);
         }
       }
     }
 
-    // Upstream BFS (Foundational roots feeding into this project)
-    const upQueue = [{ id: rootId, hop: 0 }];
-    upstream[rootId] = { hop: 0 };
-    while (upQueue.length > 0) {
-      const { id, hop } = upQueue.shift();
-      if (hop >= 2) continue;
-
-      const edges = incomingAdj[id] || [];
-      for (const edge of edges) {
-        const nextHop = hop + 1;
-        const edgeKey = `${edge.source}->${id}`;
-        if (!edgeHops[edgeKey]) {
-          edgeHops[edgeKey] = { hop: nextHop, direction: 'incoming' };
-        }
-        if (!upstream[edge.source] || upstream[edge.source].hop > nextHop) {
-          upstream[edge.source] = { hop: nextHop };
-          upQueue.push({ id: edge.source, hop: nextHop });
-        }
+    ends.forEach(([s, t]) => {
+      if (this.reachHops[s] !== undefined && this.reachHops[t] !== undefined) {
+        this.reachEdgeHops[`${s}->${t}`] = Math.max(this.reachHops[s], this.reachHops[t]);
       }
-    }
+    });
+  }
 
-    this.cascadeDownstreamHops = downstream;
-    this.cascadeUpstreamHops = upstream;
-    this.cascadeEdgeHops = edgeHops;
+  // Only these relations read one way: "A depends on B" and "A has sub-project B"
+  isDirectedLink(link) {
+    return link.relation_type === 'depends_on' || link.relation_type === 'subproject';
   }
 
   getCategoryColor(category) {
@@ -214,16 +187,12 @@ class IdeaGraph3D {
       return '#06b6d4'; // Bright cyan for multi-selected nodes
     }
 
-    if (this.nodeColorMode === 'cascade' && this.selectedNode) {
-      const down = this.cascadeDownstreamHops[node.id];
-      if (down) {
-        if (down.hop === 1) return '#00f5ff'; // Electric Cyan Hop 1
-        if (down.hop === 2) return '#10b981'; // Mint Green Hop 2
-        return '#a855f7';                     // Radiant Violet Hop 3+
-      }
-      const up = this.cascadeUpstreamHops[node.id];
-      if (up) return '#f59e0b';               // Golden Amber Upstream
-      return 'rgba(71, 85, 105, 0.2)';       // Dimmed background
+    if (this.nodeColorMode === 'reach' && this.selectedNode) {
+      const hop = this.reachHops[node.id];
+      if (hop === 1) return '#00f5ff'; // Electric Cyan: directly connected
+      if (hop === 2) return '#10b981'; // Mint Green: 2 hops
+      if (hop === 3) return '#a855f7'; // Radiant Violet: 3 hops
+      return 'rgba(71, 85, 105, 0.2)'; // Dimmed: out of reach
     }
 
     if (this.horizonMode && this.selectedNode) {
@@ -270,14 +239,13 @@ class IdeaGraph3D {
     const edgeKey = `${srcId}->${tgtId}`;
 
     if (this.selectedNode) {
-      const hopInfo = this.cascadeEdgeHops[edgeKey];
-      if (hopInfo) {
-        if (hopInfo.direction === 'incoming') return '#f59e0b'; // Amber upstream
-        if (hopInfo.hop === 1) return '#00f5ff'; // Electric Cyan Hop 1
-        if (hopInfo.hop === 2) return '#10b981'; // Mint Green Hop 2
-        return '#a855f7';                        // Radiant Violet Hop 3+
+      const hop = this.reachEdgeHops[edgeKey];
+      if (hop !== undefined) {
+        if (hop <= 1) return '#00f5ff'; // Electric Cyan: direct links
+        if (hop === 2) return '#10b981'; // Mint Green: 2 hops
+        return '#a855f7';                // Radiant Violet: 3 hops
       }
-      return 'rgba(255, 255, 255, 0.04)'; // Dimmed non-cascade links
+      return 'rgba(255, 255, 255, 0.04)'; // Dimmed links out of reach
     }
 
     if (this.horizonMode && this.selectedNode) {
@@ -296,72 +264,16 @@ class IdeaGraph3D {
     const edgeKey = `${srcId}->${tgtId}`;
 
     if (this.selectedNode) {
-      const hopInfo = this.cascadeEdgeHops[edgeKey];
-      if (hopInfo) {
-        if (hopInfo.hop === 1) return 3.2;
-        if (hopInfo.hop === 2) return 2.2;
+      const hop = this.reachEdgeHops[edgeKey];
+      if (hop !== undefined) {
+        if (hop <= 1) return 3.2;
+        if (hop === 2) return 2.2;
         return 1.8;
       }
       return 0.6;
     }
 
     return link.relation_type === 'shared_bom' ? 2.5 : 1.5;
-  }
-
-  getLinkParticles(link) {
-    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
-    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
-    const edgeKey = `${srcId}->${tgtId}`;
-
-    if (this.selectedNode) {
-      const hopInfo = this.cascadeEdgeHops[edgeKey];
-      if (hopInfo) {
-        if (hopInfo.hop === 1) return 4;
-        if (hopInfo.hop === 2) return 3;
-        return 2;
-      }
-      return 0;
-    }
-
-    return link.relation_type === 'shared_bom' ? 3 : 1;
-  }
-
-  getLinkParticleSpeed(link) {
-    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
-    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
-    const edgeKey = `${srcId}->${tgtId}`;
-
-    if (this.selectedNode) {
-      const hopInfo = this.cascadeEdgeHops[edgeKey];
-      if (hopInfo) {
-        if (hopInfo.hop === 1) return 0.010;
-        if (hopInfo.hop === 2) return 0.006;
-        return 0.003;
-      }
-    }
-
-    return link.relation_type === 'shared_bom' ? 0.008 : 0.004;
-  }
-
-  getLinkParticleWidth(link) {
-    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
-    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
-    const edgeKey = `${srcId}->${tgtId}`;
-
-    if (this.selectedNode) {
-      const hopInfo = this.cascadeEdgeHops[edgeKey];
-      if (hopInfo) {
-        if (hopInfo.hop === 1) return 3.2;
-        if (hopInfo.hop === 2) return 2.4;
-        return 1.8;
-      }
-    }
-
-    return link.relation_type === 'shared_bom' ? 3.0 : 1.8;
-  }
-
-  getLinkParticleColor(link) {
-    return this.getLinkColor(link);
   }
 
   isNeighbor(nodeAId, nodeBId) {
@@ -390,7 +302,7 @@ class IdeaGraph3D {
     this._isSelecting = true;
     try {
       this.selectedNode = node;
-      this.computeCascadeHops(node ? node.id : null);
+      this.computeReach(node ? node.id : null);
       this.refreshStyles();
 
       if (notify && this.onNodeSelectedCallback) {
@@ -409,7 +321,7 @@ class IdeaGraph3D {
         return; // In multi-select mode, clicking background preserves selection!
       }
       this.selectedNode = null;
-      this.computeCascadeHops(null);
+      this.computeReach(null);
       this.refreshStyles();
 
       if (notify && this.onNodeSelectedCallback) {
@@ -468,10 +380,7 @@ class IdeaGraph3D {
     this.graph.nodeVal(this.graph.nodeVal());
     this.graph.linkColor(this.graph.linkColor());
     this.graph.linkWidth(this.graph.linkWidth());
-    this.graph.linkDirectionalParticles(this.graph.linkDirectionalParticles());
-    this.graph.linkDirectionalParticleSpeed(this.graph.linkDirectionalParticleSpeed());
-    this.graph.linkDirectionalParticleWidth(this.graph.linkDirectionalParticleWidth());
-    this.graph.linkDirectionalParticleColor(this.graph.linkDirectionalParticleColor());
+    this.graph.linkDirectionalArrowColor(this.graph.linkDirectionalArrowColor());
   }
 
   focusNodeById(nodeId) {
