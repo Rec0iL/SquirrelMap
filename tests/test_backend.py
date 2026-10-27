@@ -108,7 +108,8 @@ An overview.
                      '{"action":"add_connection","source":"zz-act-a","target":"Act B"},'
                      '{"action":"merge_ideas","keep_id":"zz-act-a","remove_id":"zz-act-b"},'
                      '{"action":"delete_idea","id":"nope"}]\n```')
-            shown, results = agent_actions.process_response(reply)
+            shown, results, created = agent_actions.process_response(reply)
+            self.assertEqual(created, [])
             self.assertNotIn("squirrelmap-actions", shown)
             self.assertEqual([ok for ok, _ in results], [True, True, True, False])
             merged = database.get_idea_by_id("zz-act-a")
@@ -120,6 +121,39 @@ An overview.
         finally:
             database.delete_idea("zz-act-a")
             database.delete_idea("zz-act-b")
+
+    def test_note_blocks_keep_nested_code_and_find_all_notes(self):
+        reply = ("Two projects:\n\n```markdown\n---\nstatus: concept\ntitle: Note One\n---\n\n# Note One\nIntro.\n\n"
+                 "```cpp\nvoid setup() {}\n```\n\nAfter the code.\n```\n\nand\n\n"
+                 "```md\n---\ntitle: Note Two\n---\n# Note Two\n```\n")
+        blocks = database.extract_note_blocks(reply)
+        self.assertEqual(len(blocks), 2)
+        self.assertIn("void setup()", blocks[0])
+        self.assertIn("After the code.", blocks[0])
+        self.assertEqual(database.extract_idea_from_text(reply)["title"], "Note One")
+
+    def test_new_project_is_saved_before_actions_run(self):
+        from backend import agent_actions
+        from backend.models import IdeaNode
+        database.save_or_update_idea(IdeaNode(id="zz-link-target", title="ZZ Link Target"))
+        reply = ("```markdown\n---\ntitle: ZZ Fresh Project\ncategory: Test\n"
+                 "connections:\n  - target: zz-link-target\n    relation: shared_bom\n---\n# ZZ Fresh Project\nNew.\n```\n\n"
+                 "```squirrelmap-actions\n[{\"action\": \"update_idea\", \"id\": \"ZZ Fresh Project\", \"add_tags\": [\"linked\"]}]\n```")
+        try:
+            shown, results, created = agent_actions.process_response(reply)
+            self.assertEqual([i.id for i in created], ["zz-fresh-project"])
+            self.assertTrue(all(ok for ok, _ in results), results)
+            self.assertIn("linked", database.get_idea_by_id("zz-fresh-project").tags)
+            self.assertTrue(any(e.source == "zz-fresh-project" and e.target == "zz-link-target" and e.relation_type == "shared_bom"
+                                for e in database.get_all_edges()))
+            # Drafting the same project again must not overwrite it
+            _, results, created = agent_actions.process_response(reply.split("\n\n```squirrelmap-actions")[0])
+            self.assertEqual(created, [])
+            self.assertFalse(results[0][0])
+            self.assertIn("linked", database.get_idea_by_id("zz-fresh-project").tags)
+        finally:
+            database.delete_idea("zz-fresh-project")
+            database.delete_idea("zz-link-target")
 
 if __name__ == "__main__":
     unittest.main()

@@ -235,7 +235,7 @@ class McpChatManager {
     chips.forEach(chip => {
       chip.addEventListener('click', () => {
         const prompt = chip.getAttribute('data-prompt');
-        if (prompt && this.input) {
+        if (prompt && this.input && !this.refuseWhileBusy()) {
           this.input.textContent = prompt;
           this.adjustInputHeight();
           this.sendMessage();
@@ -684,20 +684,25 @@ class McpChatManager {
 
     const referencedNodes = [];
     const seenIds = new Set();
-    let textParts = [];
+    let rawText = "";
     let bubbleHtml = "";
 
     const allNodes = (this.app && this.app.allNodes) ? this.app.allNodes : [];
 
     const walk = (node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        textParts.push(node.textContent);
-        bubbleHtml += this.escapeHtml(node.textContent);
+        rawText += node.textContent;
+        bubbleHtml += this.escapeHtml(node.textContent).replace(/\n/g, "<br>");
       } else if (node.nodeType === Node.ELEMENT_NODE) {
+        // Pasted multi-line text arrives as one <div> per line: each block starts on a new line
+        if ((node.tagName === "DIV" || node.tagName === "P") && rawText && !rawText.endsWith("\n")) {
+          rawText += "\n";
+          bubbleHtml += "<br>";
+        }
         if (node.classList.contains("inline-node-card")) {
           const id = node.getAttribute("data-node-id");
           const label = node.getAttribute("data-node-label");
-          textParts.push(`[Project: "${label}" (id: ${id})]`);
+          rawText += `[Project: "${label}" (id: ${id})]`;
 
           const fullNode = allNodes.find(n => n.id === id) || { id, title: label, name: label, label };
           if (!seenIds.has(id)) {
@@ -708,7 +713,7 @@ class McpChatManager {
           const cardClone = this.createInlineCardElement(fullNode, false);
           bubbleHtml += cardClone.outerHTML;
         } else if (node.tagName === "BR") {
-          textParts.push("\n");
+          rawText += "\n";
           bubbleHtml += "<br>";
         } else {
           for (let child of node.childNodes) {
@@ -722,8 +727,7 @@ class McpChatManager {
       walk(child);
     }
 
-    const text = textParts.join("").trim();
-    return { text, referencedNodes, bubbleHtml };
+    return { text: rawText.trim(), referencedNodes, bubbleHtml };
   }
 
   open() {
@@ -915,9 +919,28 @@ class McpChatManager {
   // ---- Chat history persistence ----
 
   recordEntry(entry) {
-    if (this.restoringChat) return;
+    if (this.restoringChat) return null;
     this.chatLog.push(entry);
     this.scheduleSaveChat();
+    return entry;
+  }
+
+  /** Removes a user message (bubble + saved entry), e.g. when its failed request is edited instead of retried. */
+  removeUserTurn(msgDiv) {
+    if (!msgDiv) return;
+    const idx = this.chatLog.indexOf(msgDiv.chatLogEntry);
+    if (idx !== -1) this.chatLog.splice(idx, 1);
+    msgDiv.remove();
+    this.scheduleSaveChat();
+  }
+
+  /** Switching or clearing the chat while the agent works would put its reply into the wrong conversation. */
+  refuseWhileBusy() {
+    if (!this.isBusy) return false;
+    if (this.app && this.app.showToast) {
+      this.app.showToast("Please wait until the agent has answered.", "warn");
+    }
+    return true;
   }
 
   scheduleSaveChat() {
@@ -934,7 +957,7 @@ class McpChatManager {
         t = '🎙️ ' + (first.transcript || 'Voice note');
       } else {
         const tmp = document.createElement('div');
-        tmp.innerHTML = first.html || '';
+        tmp.innerHTML = (first.html || '').replace(/<br\s*\/?>/gi, ' ');
         t = tmp.textContent || '';
       }
     }
@@ -1007,6 +1030,7 @@ class McpChatManager {
       row.querySelector('.chat-history-main').addEventListener('click', () => this.loadChat(c.id));
       row.querySelector('.chat-history-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
+        if (c.id === this.chatId && this.refuseWhileBusy()) return;
         if (!confirm(`Delete this chat?\n\n"${c.title}"\n\nThis also removes its voice recordings.`)) return;
         const r = await fetch('/api/chats/' + c.id, { method: 'DELETE' }).catch(() => null);
         if (r && r.ok) {
@@ -1021,7 +1045,7 @@ class McpChatManager {
   }
 
   async loadChat(id) {
-    if (this.isBusy) return;
+    if (this.refuseWhileBusy()) return;
     const resp = await fetch('/api/chats/' + id).catch(() => null);
     const sess = resp && resp.ok ? await safeJson(resp) : null;
     if (!sess || !Array.isArray(sess.messages)) {
@@ -1054,8 +1078,9 @@ class McpChatManager {
 
   clearChat() {
     // Starts a fresh conversation; the previous one stays available in the history.
+    if (this.refuseWhileBusy()) return;
     clearTimeout(this.saveTimer);
-    if (this.chatLog.length > 0 && this.chatId) this.saveChat();
+    if (this.chatLog.length > 0) this.saveChat();
     this.chatId = null;
     this.chatLog = [];
     this.history = [];
@@ -1064,10 +1089,11 @@ class McpChatManager {
     this.appendWelcomeMessage();
   }
 
-  appendUserMessage(bubbleHtml, referencedNodes = []) {
-    this.recordEntry({ role: 'user', kind: 'html', html: bubbleHtml });
+  appendUserMessage(bubbleHtml) {
+    const entry = this.recordEntry({ role: 'user', kind: 'html', html: bubbleHtml });
     const msgDiv = document.createElement("div");
     msgDiv.className = "chat-message user";
+    msgDiv.chatLogEntry = entry;
 
     const avatar = document.createElement("div");
     avatar.className = "chat-message-avatar";
@@ -1093,6 +1119,7 @@ class McpChatManager {
       this.messagesContainer.appendChild(msgDiv);
       this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
     }
+    return msgDiv;
   }
 
   async sendMessage() {
@@ -1105,15 +1132,25 @@ class McpChatManager {
     this.adjustInputHeight();
     this.hideMentionPopup();
 
-    this.isBusy = true;
-    this.btnSend.disabled = true;
-
     // Append user message with clean inline cards directly inside the text flow!
-    this.appendUserMessage(bubbleHtml, referencedNodes);
+    const userMsg = this.appendUserMessage(bubbleHtml);
+    await this.runAgentTurn({ text, originalText: text, referencedNodes, userMsgs: [userMsg] });
+  }
+
+  /**
+   * Sends one user turn to the agent and shows the reply, or an error card whose buttons re-run the turn.
+   * The user's message is already in the chat (turn.userMsgs), so a retry does not add it a second time.
+   */
+  async runAgentTurn(turn) {
+    const { text, referencedNodes = [], isVoice = false, voiceMetadata = null, loadingText = null } = turn;
     this.history.push({ role: "user", content: text });
 
-    const loadingElem = this.appendLoadingIndicator();
+    this.isBusy = true;
+    this.btnSend.disabled = true;
+    if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = true;
+    const loadingElem = this.appendLoadingIndicator(loadingText);
 
+    let data;
     try {
       const resp = await fetch("/api/mcp/chat", {
         method: "POST",
@@ -1125,18 +1162,24 @@ class McpChatManager {
           model: this.agentConfig.model,
           endpoint_url: this.agentConfig.endpoint_url,
           api_key: this.agentConfig.api_key,
-          referenced_ideas: referencedNodes
+          referenced_ideas: referencedNodes,
+          is_voice: isVoice,
+          voice_metadata: voiceMetadata
         })
       });
+      data = await safeJson(resp);
+    } catch (err) {
+      data = { success: false, error: err.message };
+    }
+    loadingElem.remove();
 
-      const data = await safeJson(resp);
-      loadingElem.remove();
-
+    try {
       if (data.success && data.response) {
+        const created = data.created_ideas || (data.created_idea ? [data.created_idea] : []);
         let respText = data.response;
-        if (data.created_idea) {
-          respText += `\n\n> 🐿️ **Auto-Saved to Mindmap**: Added **${data.created_idea.title}** to \`${data.created_idea.category || "General"}\`!`;
-        }
+        created.forEach(idea => {
+          respText += `\n\n> 🐿️ **Auto-Saved to Mindmap**: Added **${idea.title}** to \`${idea.category || "General"}\`!`;
+        });
         if (data.attempts && data.attempts > 1) {
           respText += `\n\n*(⚡ AI diagnosed failure and self-corrected on attempt ${data.attempts})*`;
         }
@@ -1145,47 +1188,33 @@ class McpChatManager {
 
         // Refresh graph data in case agent created or linked ideas
         await this.app.loadGraphData();
-        if (data.created_idea && this.app && this.app.graph3d) {
-          this.app.graph3d.focusOnNode(data.created_idea.id);
+        if (created.length > 0 && this.app && this.app.graph3d) {
+          this.app.graph3d.focusOnNode(created[0].id);
           if (this.app.showToast) {
-            this.app.showToast(`Saved "${data.created_idea.title}" to your mindmap!`, "success");
+            this.app.showToast(`Saved ${created.map(i => `"${i.title}"`).join(", ")} to your mindmap!`, "success");
           }
         }
       } else {
         if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
           this.history.pop();
         }
-        const errMsg = data.error || "Failed to receive response from agent.";
         this.appendErrorCard({
           provider: this.agentConfig.provider || "agy",
           model: data.model || this.agentConfig.model,
-          errorMessage: errMsg,
-          originalText: text,
-          referencedNodes: referencedNodes,
-          bubbleHtml: bubbleHtml
+          errorMessage: data.error || "Failed to receive response from agent.",
+          turn
         });
       }
-    } catch (err) {
-      loadingElem.remove();
-      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-        this.history.pop();
-      }
-      this.appendErrorCard({
-        provider: this.agentConfig.provider || "agy",
-        model: this.agentConfig.model,
-        errorMessage: err.message,
-        originalText: text,
-        referencedNodes: referencedNodes,
-        bubbleHtml: bubbleHtml
-      });
     } finally {
       this.isBusy = false;
       this.btnSend.disabled = false;
+      if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = false;
       if (this.input) this.input.focus();
     }
   }
 
-  appendErrorCard({ provider, model, errorMessage, originalText, referencedNodes, bubbleHtml }) {
+  /** Shows a failed request. `turn` is the request to re-run; without one (nothing to retry) no buttons are shown. */
+  appendErrorCard({ provider, model, errorMessage, turn = null }) {
     this.scheduleSaveChat(); // history was rolled back for the failed request
     const msgDiv = document.createElement("div");
     msgDiv.className = "chat-message assistant chat-error-container";
@@ -1197,7 +1226,6 @@ class McpChatManager {
     const bubble = document.createElement("div");
     bubble.className = "chat-bubble chat-error-bubble";
 
-    const errorId = `err_${Date.now()}`;
     const escapedMsg = this.escapeHtml(errorMessage || "Unknown error");
     const escapedModel = this.escapeHtml(model || "");
 
@@ -1210,17 +1238,18 @@ class McpChatManager {
         Processing halted because the agent encountered an error:
       </div>
       <pre class="chat-error-details">${escapedMsg}</pre>
+      ${turn ? `
       <div class="chat-error-actions">
-        <button class="chat-error-btn btn-tell-ai" id="btnTellAi_${errorId}" title="Feeds error details back to AI so it diagnoses what went wrong and has another go">
+        <button class="chat-error-btn btn-tell-ai" title="Feeds error details back to AI so it diagnoses what went wrong and has another go">
           🔄 Tell AI what went wrong & retry
         </button>
-        <button class="chat-error-btn btn-retry-direct" id="btnRetry_${errorId}" title="Re-execute the exact same request">
+        <button class="chat-error-btn btn-retry-direct" title="Re-execute the exact same request">
           🔁 Retry
         </button>
-        <button class="chat-error-btn btn-edit-request" id="btnEdit_${errorId}" title="Restore prompt into the input field for editing">
+        <button class="chat-error-btn btn-edit-request" title="Restore prompt into the input field for editing">
           ✏️ Edit prompt
         </button>
-      </div>
+      </div>` : ""}
     `;
 
     msgDiv.appendChild(avatar);
@@ -1228,197 +1257,55 @@ class McpChatManager {
     this.messagesContainer.appendChild(msgDiv);
     this.scrollToBottom();
 
-    const btnTellAi = bubble.querySelector(`#btnTellAi_${errorId}`);
-    if (btnTellAi) {
-      btnTellAi.addEventListener("click", () => {
+    if (turn) {
+      bubble.querySelector(".btn-tell-ai").addEventListener("click", () => {
+        if (this.refuseWhileBusy()) return;
         msgDiv.remove();
-        this.tellAiWhatWentWrongAndRetry({
-          originalText,
-          errorMessage,
-          referencedNodes
-        });
+        this.tellAiWhatWentWrongAndRetry(turn, errorMessage);
       });
-    }
-
-    const btnRetry = bubble.querySelector(`#btnRetry_${errorId}`);
-    if (btnRetry) {
-      btnRetry.addEventListener("click", () => {
+      bubble.querySelector(".btn-retry-direct").addEventListener("click", () => {
+        if (this.refuseWhileBusy()) return;
         msgDiv.remove();
-        this.resendRequest(originalText, referencedNodes, bubbleHtml);
+        this.runAgentTurn(turn);
       });
-    }
-
-    const btnEdit = bubble.querySelector(`#btnEdit_${errorId}`);
-    if (btnEdit) {
-      btnEdit.addEventListener("click", () => {
+      bubble.querySelector(".btn-edit-request").addEventListener("click", () => {
         msgDiv.remove();
-        this.restoreInput(originalText, referencedNodes);
+        // The message goes back into the input, so it leaves the conversation until it is sent again
+        (turn.userMsgs || []).forEach(el => this.removeUserTurn(el));
+        this.restoreInput(turn.originalText, turn.referencedNodes);
       });
     }
 
     return msgDiv;
   }
 
-  async tellAiWhatWentWrongAndRetry({ originalText, errorMessage, referencedNodes }) {
-    if (this.isBusy) return;
+  tellAiWhatWentWrongAndRetry(turn, errorMessage) {
+    const correctivePrompt = `My previous request encountered an execution error:\n> ${errorMessage}\n\nPlease diagnose what went wrong, correct the approach, and fulfill the original request:\n\n${turn.originalText}`;
 
-    const correctivePrompt = `My previous request encountered an execution error:\n> ${errorMessage}\n\nPlease diagnose what went wrong, correct the approach, and fulfill the original request:\n\n${originalText}`;
-
+    // The original request stays visible right above, so this bubble only shows the error being diagnosed
     const displayHtml = `
       <div class="chat-self-correct-tag">🔄 <em>Self-Correction Retry</em></div>
-      <div style="font-size: 0.82rem; margin-top: 4px;"><strong>Diagnosing error:</strong> <code>${this.escapeHtml(errorMessage.substring(0, 100))}...</code></div>
-      <div style="font-size: 0.85rem; margin-top: 4px; color: var(--text-secondary);">${this.escapeHtml(originalText)}</div>
+      <div style="font-size: 0.82rem; margin-top: 4px;"><strong>Diagnosing error:</strong> <code>${this.escapeHtml(errorMessage.substring(0, 100))}${errorMessage.length > 100 ? "…" : ""}</code></div>
     `;
-    this.appendUserMessage(displayHtml, referencedNodes);
-    this.history.push({ role: "user", content: correctivePrompt });
-
-    this.isBusy = true;
-    this.btnSend.disabled = true;
-    const loadingElem = this.appendLoadingIndicator();
-
-    try {
-      const resp = await fetch("/api/mcp/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: correctivePrompt,
-          history: this.history,
-          provider: this.agentConfig.provider || "agy",
-          model: this.agentConfig.model,
-          endpoint_url: this.agentConfig.endpoint_url,
-          api_key: this.agentConfig.api_key,
-          referenced_ideas: referencedNodes
-        })
-      });
-
-      const data = await safeJson(resp);
-      loadingElem.remove();
-
-      if (data.success && data.response) {
-        let respText = data.response;
-        if (data.attempts && data.attempts > 1) {
-          respText += `\n\n*(⚡ AI self-corrected on backend attempt ${data.attempts})*`;
-        }
-        this.appendMessage("assistant", respText, true);
-        this.history.push({ role: "assistant", content: data.response });
-        await this.app.loadGraphData();
-      } else {
-        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-          this.history.pop();
-        }
-        const errMsg = data.error || "Failed to receive response from agent.";
-        this.appendErrorCard({
-          provider: this.agentConfig.provider || "agy",
-          model: data.model || this.agentConfig.model,
-          errorMessage: errMsg,
-          originalText,
-          referencedNodes,
-          bubbleHtml: displayHtml
-        });
-      }
-    } catch (err) {
-      loadingElem.remove();
-      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-        this.history.pop();
-      }
-      this.appendErrorCard({
-        provider: this.agentConfig.provider || "agy",
-        model: this.agentConfig.model,
-        errorMessage: err.message,
-        originalText,
-        referencedNodes,
-        bubbleHtml: displayHtml
-      });
-    } finally {
-      this.isBusy = false;
-      this.btnSend.disabled = false;
-      if (this.input) this.input.focus();
-    }
+    const userMsg = this.appendUserMessage(displayHtml);
+    return this.runAgentTurn({ ...turn, text: correctivePrompt, userMsgs: [...(turn.userMsgs || []), userMsg] });
   }
 
-  async resendRequest(text, referencedNodes, bubbleHtml) {
-    if (this.isBusy) return;
-
-    this.appendUserMessage(bubbleHtml, referencedNodes);
-    this.history.push({ role: "user", content: text });
-
-    this.isBusy = true;
-    this.btnSend.disabled = true;
-    const loadingElem = this.appendLoadingIndicator();
-
-    try {
-      const resp = await fetch("/api/mcp/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          history: this.history,
-          provider: this.agentConfig.provider || "agy",
-          model: this.agentConfig.model,
-          endpoint_url: this.agentConfig.endpoint_url,
-          api_key: this.agentConfig.api_key,
-          referenced_ideas: referencedNodes
-        })
-      });
-
-      const data = await safeJson(resp);
-      loadingElem.remove();
-
-      if (data.success && data.response) {
-        let respText = data.response;
-        if (data.attempts && data.attempts > 1) {
-          respText += `\n\n*(⚡ AI self-corrected on attempt ${data.attempts})*`;
-        }
-        this.appendMessage("assistant", respText, true);
-        this.history.push({ role: "assistant", content: data.response });
-        await this.app.loadGraphData();
-      } else {
-        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-          this.history.pop();
-        }
-        const errMsg = data.error || "Failed to receive response from agent.";
-        this.appendErrorCard({
-          provider: this.agentConfig.provider || "agy",
-          model: data.model || this.agentConfig.model,
-          errorMessage: errMsg,
-          originalText: text,
-          referencedNodes: referencedNodes,
-          bubbleHtml: bubbleHtml
-        });
-      }
-    } catch (err) {
-      loadingElem.remove();
-      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-        this.history.pop();
-      }
-      this.appendErrorCard({
-        provider: this.agentConfig.provider || "agy",
-        model: this.agentConfig.model,
-        errorMessage: err.message,
-        originalText: text,
-        referencedNodes: referencedNodes,
-        bubbleHtml: bubbleHtml
-      });
-    } finally {
-      this.isBusy = false;
-      this.btnSend.disabled = false;
-      if (this.input) this.input.focus();
-    }
-  }
-
+  /** Puts a sent message back into the input, turning its [Project: ...] references back into cards. */
   restoreInput(text, referencedNodes) {
     if (!this.input) return;
     this.input.innerHTML = "";
-    if (referencedNodes && referencedNodes.length > 0) {
-      referencedNodes.forEach(node => {
-        const card = this.createInlineCardElement(node, true);
-        this.input.appendChild(card);
-        this.input.appendChild(document.createTextNode(" "));
-      });
+    const byId = new Map((referencedNodes || []).map(n => [n.id, n]));
+    const ref = /\[Project: "(.*?)" \(id: ([^)]*)\)\]/g;
+    let last = 0;
+    let m;
+    text = text || "";
+    while ((m = ref.exec(text)) !== null) {
+      if (m.index > last) this.input.appendChild(document.createTextNode(text.slice(last, m.index)));
+      this.input.appendChild(this.createInlineCardElement(byId.get(m[2]) || { id: m[2], title: m[1] }, true));
+      last = ref.lastIndex;
     }
-    if (text) {
-      this.input.appendChild(document.createTextNode(text));
-    }
+    if (last < text.length) this.input.appendChild(document.createTextNode(text.slice(last)));
     this.adjustInputHeight();
     this.input.focus();
   }
@@ -1543,9 +1430,10 @@ class McpChatManager {
   }
 
   appendVoiceUserMessage({ audioUrl, transcript, durationSeconds, referencedNodes = [] }) {
-    this.recordEntry({ role: 'user', kind: 'voice', audioUrl, transcript, durationSeconds });
+    const entry = this.recordEntry({ role: 'user', kind: 'voice', audioUrl, transcript, durationSeconds });
     const msgDiv = document.createElement("div");
     msgDiv.className = "chat-message user chat-voice-user-message";
+    msgDiv.chatLogEntry = entry;
 
     const avatar = document.createElement("div");
     avatar.className = "chat-message-avatar";
@@ -1654,13 +1542,11 @@ class McpChatManager {
       this.btnSend.disabled = false;
       if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = false;
 
+      // No retry buttons: there is no transcript to send
       this.appendErrorCard({
         provider: "Whisper AI",
         model: "base",
-        errorMessage: `Failed to transcribe audio recording: ${err.message}`,
-        originalText: "Voice Recording",
-        referencedNodes: referencedNodes,
-        bubbleHtml: `<div>🎙️ <em>Voice Recording (${durationSeconds}s) failed transcription.</em></div>`
+        errorMessage: `Failed to transcribe audio recording: ${err.message}`
       });
       return;
     }
@@ -1682,94 +1568,28 @@ class McpChatManager {
     }
 
     // Step 2: Append the user Voice Note card to chat (collapsible Whisper transcript)
-    this.appendVoiceUserMessage({
+    const userMsg = this.appendVoiceUserMessage({
       audioUrl: transcriptData.audio_url,
       transcript: rawTranscript,
       durationSeconds,
       referencedNodes
     });
-    this.history.push({ role: "user", content: rawTranscript });
 
     // Step 3: Pipe the Whisper transcript into the selected AI Agent
     const providerName = (this.agentConfig.provider || "AI").toUpperCase();
-    const aiLoadingElem = this.appendLoadingIndicator(`${providerName} is structuring project & analyzing tangents...`);
-
-    try {
-      const chatResp = await fetch("/api/mcp/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: rawTranscript,
-          history: this.history,
-          provider: this.agentConfig.provider || "agy",
-          model: this.agentConfig.model,
-          endpoint_url: this.agentConfig.endpoint_url,
-          api_key: this.agentConfig.api_key,
-          referenced_ideas: referencedNodes,
-          is_voice: true,
-          voice_metadata: {
-            audio_url: transcriptData.audio_url,
-            duration: durationSeconds,
-            language: transcriptData.language
-          }
-        })
-      });
-
-      const chatData = await safeJson(chatResp);
-      aiLoadingElem.remove();
-
-      if (chatData.success && chatData.response) {
-        let respText = chatData.response;
-        if (chatData.created_idea) {
-          respText += `\n\n> 🐿️ **Auto-Saved to Mindmap**: Added **${chatData.created_idea.title}** to \`${chatData.created_idea.category || "General"}\`!`;
-        }
-        if (chatData.attempts && chatData.attempts > 1) {
-          respText += `\n\n*(⚡ AI diagnosed failure and self-corrected on attempt ${chatData.attempts})*`;
-        }
-        this.appendMessage("assistant", respText, true);
-        this.history.push({ role: "assistant", content: chatData.response });
-
-        // Refresh graph data in case agent created or linked ideas
-        await this.app.loadGraphData();
-        if (chatData.created_idea && this.app && this.app.graph3d) {
-          this.app.graph3d.focusOnNode(chatData.created_idea.id);
-          if (this.app.showToast) {
-            this.app.showToast(`Saved "${chatData.created_idea.title}" to your mindmap!`, "success");
-          }
-        }
-      } else {
-        if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-          this.history.pop();
-        }
-        const errMsg = chatData.error || "Failed to receive response from agent.";
-        this.appendErrorCard({
-          provider: this.agentConfig.provider || "agy",
-          model: chatData.model || this.agentConfig.model,
-          errorMessage: errMsg,
-          originalText: rawTranscript,
-          referencedNodes: referencedNodes,
-          bubbleHtml: `<div>🎙️ Voice idea: <em>${this.escapeHtml(rawTranscript.substring(0, 100))}...</em></div>`
-        });
-      }
-    } catch (err) {
-      aiLoadingElem.remove();
-      if (this.history.length > 0 && this.history[this.history.length - 1].role === "user") {
-        this.history.pop();
-      }
-      this.appendErrorCard({
-        provider: this.agentConfig.provider || "agy",
-        model: this.agentConfig.model,
-        errorMessage: err.message,
-        originalText: rawTranscript,
-        referencedNodes: referencedNodes,
-        bubbleHtml: `<div>🎙️ Voice idea: <em>${this.escapeHtml(rawTranscript.substring(0, 100))}...</em></div>`
-      });
-    } finally {
-      this.isBusy = false;
-      this.btnSend.disabled = false;
-      if (this.btnVoiceRecord) this.btnVoiceRecord.disabled = false;
-      if (this.input) this.input.focus();
-    }
+    await this.runAgentTurn({
+      text: rawTranscript,
+      originalText: rawTranscript,
+      referencedNodes,
+      userMsgs: [userMsg],
+      isVoice: true,
+      voiceMetadata: {
+        audio_url: transcriptData.audio_url,
+        duration: durationSeconds,
+        language: transcriptData.language
+      },
+      loadingText: `${providerName} is structuring project & analyzing tangents...`
+    });
   }
 
 }

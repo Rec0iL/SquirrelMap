@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend import database
-from backend.models import IdeaEdge, BOMItem
+from backend.models import IdeaEdge, IdeaNode, BOMItem
 
 ACTION_BLOCK_RE = re.compile(r"```squirrelmap-actions\s*\n(.*?)```", re.DOTALL)
 
@@ -40,6 +40,7 @@ To perform changes, end your reply with ONE fenced block of JSON actions. Squirr
 ```
 Rules: the block must be strictly valid JSON (no comments, no trailing commas). Use the exact project ids from the PROJECT INDEX. Only include fields you want to change. Use the block only when the user asked for a change.
 To CREATE a new project, do NOT use an action: write the project note with YAML frontmatter as described below and SquirrelMap saves it.
+The note is saved before the actions run, so in the same reply you can link the new project with add_connection, using its title as the id.
 Deleted projects are moved to a trash folder, so a mistake can be undone by the user. After the block do not write anything else."""
 
 
@@ -239,6 +240,36 @@ HANDLERS = {
 }
 
 
+def save_new_projects(text: str) -> Tuple[List[IdeaNode], List[Tuple[bool, str]], List[Dict[str, Any]]]:
+    """Saves project notes the agent drafted with YAML frontmatter.
+    Returns (created projects, problems, add_connection actions for the notes' `connections`).
+    A note for a project that already exists is not saved: overwriting would silently replace the user's note."""
+    created: List[IdeaNode] = []
+    problems: List[Tuple[bool, str]] = []
+    links: List[Dict[str, Any]] = []
+    for raw in database.extract_note_blocks(text):
+        data = database.parse_markdown_string(raw)
+        if not data:
+            continue
+        existing = _resolve(data["id"]) or _resolve(data["title"])
+        if existing:
+            problems.append((False, f"Not saved as a new project: **{existing.title}** (`{existing.id}`) already exists - ask me to update it instead"))
+            continue
+        idea = IdeaNode(**data)
+        database.save_or_update_idea(idea)
+        created.append(idea)
+        conns = data.get("connections")
+        for c in conns if isinstance(conns, list) else []:
+            target = c.get("target") if isinstance(c, dict) else c
+            if target:
+                link = {"action": "add_connection", "source": idea.id, "target": target}
+                if isinstance(c, dict):
+                    link["relation_type"] = c.get("relation") or c.get("relation_type")
+                    link["description"] = c.get("notes") or c.get("description") or ""
+                links.append(link)
+    return created, problems, links
+
+
 def run_actions(actions: List[Dict[str, Any]]) -> List[Tuple[bool, str]]:
     results = []
     for a in actions[:50]:
@@ -253,13 +284,16 @@ def run_actions(actions: List[Dict[str, Any]]) -> List[Tuple[bool, str]]:
     return results
 
 
-def process_response(text: str) -> Tuple[str, List[Tuple[bool, str]]]:
-    """Executes any action block in an agent reply; returns (reply to show, results)."""
+def process_response(text: str) -> Tuple[str, List[Tuple[bool, str]], List[IdeaNode]]:
+    """Saves new project notes and executes any action block in an agent reply.
+    Notes are saved first so actions can link the projects created in the same reply.
+    Returns (reply to show, action results, created projects)."""
     clean, actions, err = extract_actions(text)
-    if not actions and not err:
-        return text, []
-    results = run_actions(actions)
+    created, results, links = save_new_projects(clean)
+    results += run_actions(links + actions)
     if err:
         results.append((False, err))
+    if not results:
+        return text, [], created
     summary = "\n".join(f"> {'✅' if ok else '⚠️'} {msg}" for ok, msg in results)
-    return f"{clean}\n\n> 🐿️ **SquirrelMap actions**\n{summary}".strip(), results
+    return f"{clean}\n\n> 🐿️ **SquirrelMap actions**\n{summary}".strip(), results, created

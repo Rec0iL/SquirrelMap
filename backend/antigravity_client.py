@@ -1,9 +1,14 @@
 import asyncio
+import contextlib
 import json
 import os
 import shutil
 import re
-from typing import Optional, Dict, Any, List
+import signal
+import urllib.error
+import urllib.request
+import uuid
+from typing import Optional, Dict, Any, List, Tuple
 
 from backend.database import DATA_DIR as _DB_DATA_DIR, IDEAS_DIR
 from backend.whisper_service import _get_clean_subprocess_env
@@ -11,6 +16,74 @@ from backend import agent_actions
 
 # DATA_DIR may be unset (dev mode); fall back to the ideas folder's parent
 DATA_DIR = _DB_DATA_DIR or os.path.dirname(IDEAS_DIR)
+
+# Agent CLIs can take a while (tool use, long notes); a hung one is killed after this
+CLI_TIMEOUT = 300.0
+# Linux rejects a single command-line argument over 128 KB (E2BIG), so longer prompts go through a file
+MAX_ARG_PROMPT_BYTES = 100_000
+PROMPT_DIR = os.path.join(DATA_DIR, ".chat_prompts")
+
+
+def _kill_process_tree(proc):
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+async def _run_cli(cmd: List[str], stdin_text: Optional[str] = None, timeout: float = CLI_TIMEOUT) -> Tuple[int, str, str]:
+    """Runs an agent CLI in the vault folder. On timeout the CLI (and anything it started) is killed, then TimeoutError is raised."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=DATA_DIR,
+        env=_get_clean_subprocess_env(),
+        stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=(os.name == "posix")
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(stdin_text.encode("utf-8") if stdin_text is not None else None), timeout=timeout)
+    except asyncio.TimeoutError:
+        _kill_process_tree(proc)
+        await proc.wait()
+        raise
+    return proc.returncode, stdout.decode("utf-8", "replace").strip(), stderr.decode("utf-8", "replace").strip()
+
+
+@contextlib.contextmanager
+def _prompt_as_arg(prompt: str):
+    """Yields the prompt to pass as a CLI argument. A prompt too long for one argument is written to a file the agent reads."""
+    if len(prompt.encode("utf-8")) <= MAX_ARG_PROMPT_BYTES:
+        yield prompt
+        return
+    os.makedirs(PROMPT_DIR, exist_ok=True)
+    path = os.path.join(PROMPT_DIR, f"prompt-{uuid.uuid4().hex}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(prompt)
+    try:
+        yield (f"Your complete instructions, the conversation and the user's latest message are in the file {path}. "
+               f"Read the whole file now and reply exactly as it instructs. Do not mention the file.")
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _http_error_text(e: Exception) -> str:
+    """Includes the response body of HTTP errors (e.g. 'invalid API key'), not just the status line."""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            body = e.read().decode("utf-8", "replace").strip()[:300]
+        except Exception:
+            body = ""
+        return f"HTTP {e.code} {e.reason}" + (f": {body}" if body else "")
+    return str(e)
 
 VALID_AGY_MODELS = [
     "gemini-3.8-flash-low",
@@ -349,6 +422,11 @@ Respond ONLY with valid JSON:
         Includes an automated 3-attempt diagnostic self-correction loop when errors or empty outputs occur."""
         provider = (provider or "agy").lower()
 
+        # The client sends its history including the message being sent; drop it so the agent does not see it twice
+        history = list(history or [])
+        if history and history[-1].get("role") == "user" and (history[-1].get("content") or "").strip() == message.strip():
+            history.pop()
+
         # Build Context & Base Prompt
         user_vault = os.path.expanduser("~/SquirrelMap")
         project_index = agent_actions.build_project_index()
@@ -454,29 +532,19 @@ Your task is to:
             selected_model = self._normalize_agy_model(model)
 
             for attempt in range(1, max_attempts + 1):
-                cmd = [
-                    self.cli_path,
-                    "-p", current_prompt,
-                    "--model", selected_model,
-                    "--disable-slash-commands"
-                ]
-
                 print(f"[chat_with_agent:agy] Attempt {attempt}/{max_attempts} with model '{selected_model}'...", flush=True)
 
                 try:
-                    proc = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        cwd=DATA_DIR,
-                        env=_get_clean_subprocess_env(),
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90.0)
-                    raw_out = stdout.decode().strip()
-                    err_out = stderr.decode().strip()
+                    with _prompt_as_arg(current_prompt) as prompt_arg:
+                        returncode, raw_out, err_out = await _run_cli([
+                            self.cli_path,
+                            "-p", prompt_arg,
+                            "--model", selected_model,
+                            "--disable-slash-commands"
+                        ])
 
-                    if proc.returncode != 0:
-                        last_error = err_out or raw_out or f"AGY process exited with code {proc.returncode}"
+                    if returncode != 0:
+                        last_error = err_out or raw_out or f"AGY process exited with code {returncode}"
                         print(f"[chat_with_agent:agy] Attempt {attempt} failed: {last_error}", flush=True)
 
                         # Detect invalid model selection and automatically fall back
@@ -523,16 +591,9 @@ Your task is to:
                     }
 
                 except asyncio.TimeoutError:
-                    last_error = "AGY command timed out after 90 seconds"
+                    # Not retried: another full-length wait would only multiply the delay
                     print(f"[chat_with_agent:agy] Attempt {attempt} timed out", flush=True)
-                    if attempt < max_attempts:
-                        current_prompt = (
-                            f"{base_prompt}\n\n"
-                            f"[SYSTEM SELF-CORRECTION: Previous request timed out. Please answer concisely.]"
-                        )
-                        await asyncio.sleep(1.0)
-                        continue
-                    return {"success": False, "error": last_error, "model": selected_model}
+                    return {"success": False, "error": f"AGY did not answer within {int(CLI_TIMEOUT)} seconds and was stopped.", "model": selected_model}
                 except Exception as e:
                     last_error = str(e)
                     print(f"[chat_with_agent:agy] Attempt {attempt} exception: {last_error}", flush=True)
@@ -563,17 +624,15 @@ Your task is to:
                 return {"success": False, "error": "Claude executable not found at ~/.local/bin/claude or in PATH"}
 
             for attempt in range(1, max_attempts + 1):
-                cmd = [claude_bin, "--model", claude_model_arg, "-p", current_prompt]
+                # The prompt goes in via stdin: as an argument, long chats and pasted documents hit the 128 KB argument limit
+                cmd = [claude_bin, "--model", claude_model_arg, "-p"]
                 print(f"[chat_with_agent:claude] Attempt {attempt}/{max_attempts} with model '{selected_model}'...", flush=True)
 
                 try:
-                    proc = await asyncio.create_subprocess_exec(*cmd, cwd=DATA_DIR, env=_get_clean_subprocess_env(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90.0)
-                    raw_out = stdout.decode().strip()
-                    err_out = stderr.decode().strip()
+                    returncode, raw_out, err_out = await _run_cli(cmd, stdin_text=current_prompt)
 
-                    if proc.returncode != 0:
-                        last_error = err_out or raw_out or f"Claude CLI returned exit code {proc.returncode}"
+                    if returncode != 0:
+                        last_error = err_out or raw_out or f"Claude CLI returned exit code {returncode}"
                         print(f"[chat_with_agent:claude] Attempt {attempt} failed: {last_error}", flush=True)
                         if attempt < max_attempts:
                             current_prompt = (
@@ -595,6 +654,9 @@ Your task is to:
                     print(f"[chat_with_agent:claude] Success on attempt {attempt} ({len(raw_out)} chars)", flush=True)
                     return {"success": True, "response": raw_out, "model": selected_model, "provider": "claude", "attempts": attempt}
 
+                except asyncio.TimeoutError:
+                    print(f"[chat_with_agent:claude] Attempt {attempt} timed out", flush=True)
+                    return {"success": False, "error": f"Claude did not answer within {int(CLI_TIMEOUT)} seconds and was stopped.", "model": selected_model}
                 except Exception as e:
                     last_error = str(e)
                     if attempt < max_attempts:
@@ -610,14 +672,12 @@ Your task is to:
         elif provider == "ollama":
             url = endpoint_url or "http://localhost:11434/api/chat"
             selected_model = model or "llama3.1:8b"
-            import urllib.request
 
             for attempt in range(1, max_attempts + 1):
-                ollama_messages = [{"role": "system", "content": f"{system_instruction}\n\n{referenced_context}"}]
-                if history:
-                    for h in history[-6:]:
-                        ollama_messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
-                ollama_messages.append({"role": "user", "content": message if attempt == 1 else current_prompt})
+                ollama_messages = [{"role": "system", "content": f"{system_instruction}\n{voice_directive}\n\n{referenced_context}"}]
+                for h in history[-6:]:
+                    ollama_messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+                ollama_messages.append({"role": "user", "content": message})
 
                 payload = {
                     "model": selected_model,
@@ -650,7 +710,7 @@ Your task is to:
                     return {"success": True, "response": resp_text, "model": selected_model, "provider": "ollama", "attempts": attempt}
 
                 except Exception as e:
-                    last_error = str(e)
+                    last_error = _http_error_text(e)
                     print(f"[chat_with_agent:ollama] Attempt {attempt} error: {last_error}", flush=True)
                     if attempt < max_attempts:
                         await asyncio.sleep(1.0)
@@ -669,25 +729,27 @@ Your task is to:
                 return {"success": False, "error": "OpenCode executable not found"}
 
             for attempt in range(1, max_attempts + 1):
-                cmd = [opencode_bin, "run", "--format", "default", current_prompt]
                 print(f"[chat_with_agent:opencode] Attempt {attempt}/{max_attempts}...", flush=True)
 
                 try:
-                    proc = await asyncio.create_subprocess_exec(*cmd, cwd=DATA_DIR, env=_get_clean_subprocess_env(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90.0)
-                    out = stdout.decode().strip()
-                    err = stderr.decode().strip()
+                    with _prompt_as_arg(current_prompt) as prompt_arg:
+                        cmd = [opencode_bin, "run", "--format", "default"]
+                        if model and "/" in model:  # OpenCode models are "provider/model"; anything else means its default
+                            cmd += ["--model", model]
+                        returncode, out, err = await _run_cli(cmd + [prompt_arg])
 
-                    if proc.returncode == 0 and out:
+                    if returncode == 0 and out:
                         return {"success": True, "response": out, "model": selected_model, "provider": "opencode", "attempts": attempt}
 
-                    last_error = err or out or f"OpenCode exited with code {proc.returncode}"
+                    last_error = err or out or f"OpenCode exited with code {returncode}"
                     if attempt < max_attempts:
                         current_prompt = f"{base_prompt}\n\n[SYSTEM SELF-CORRECTION: Previous attempt failed: {last_error}. Please correct and complete.]"
                         await asyncio.sleep(1.0)
                         continue
                     return {"success": False, "error": f"OpenCode error: {last_error}", "model": selected_model}
 
+                except asyncio.TimeoutError:
+                    return {"success": False, "error": f"OpenCode did not answer within {int(CLI_TIMEOUT)} seconds and was stopped.", "model": selected_model}
                 except Exception as e:
                     last_error = str(e)
                     if attempt < max_attempts:
@@ -707,13 +769,11 @@ Your task is to:
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
 
-            import urllib.request
             for attempt in range(1, max_attempts + 1):
-                messages = [{"role": "system", "content": f"{system_instruction}\n\n{referenced_context}"}]
-                if history:
-                    for h in history[-6:]:
-                        messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
-                messages.append({"role": "user", "content": message if attempt == 1 else current_prompt})
+                messages = [{"role": "system", "content": f"{system_instruction}\n{voice_directive}\n\n{referenced_context}"}]
+                for h in history[-6:]:
+                    messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+                messages.append({"role": "user", "content": message})
 
                 payload = {
                     "model": selected_model,
@@ -740,7 +800,7 @@ Your task is to:
                     return {"success": True, "response": resp_text, "model": selected_model, "provider": provider, "attempts": attempt}
 
                 except Exception as e:
-                    last_error = str(e)
+                    last_error = _http_error_text(e)
                     print(f"[chat_with_agent:{provider}] Attempt {attempt} error: {last_error}", flush=True)
                     if attempt < max_attempts:
                         await asyncio.sleep(1.0)

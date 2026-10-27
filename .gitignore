@@ -90,3 +90,6 @@ Screenshot*.png
 .seeded
 ideas/.seeded
 trash/
+
+# Oversized agent prompts (deleted after each call)
+.chat_prompts/

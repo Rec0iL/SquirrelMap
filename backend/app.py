@@ -247,7 +247,7 @@ async def mcp_chat_endpoint(req: McpChatRequest):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return {"success": False, "response": "", "created_idea": None, "error": f"Internal error: {type(e).__name__}: {e}"}
+        return {"success": False, "response": "", "created_idea": None, "created_ideas": [], "error": f"Internal error: {type(e).__name__}: {e}"}
 
 async def _mcp_chat_impl(req: McpChatRequest):
     message = (req.message or "").strip()
@@ -270,27 +270,20 @@ async def _mcp_chat_impl(req: McpChatRequest):
         is_voice=req.is_voice
     )
 
-    created_idea = None
+    created_ideas = []
     if result.get("success"):
         resp_len = len(result.get("response", ""))
         attempts = result.get("attempts", 1)
         print(f"[API /api/mcp/chat] Success (attempts: {attempts}, len: {resp_len} chars)", flush=True)
 
-        # Execute commands the agent issued (delete/update/link/merge) and report them in the reply
-        result["response"], action_results = agent_actions.process_response(result.get("response", ""))
+        # Save project notes drafted with YAML frontmatter, then execute the commands the agent issued
+        # (delete/update/link/merge) and report them in the reply
+        result["response"], action_results, created = agent_actions.process_response(result.get("response", ""))
+        for idea_obj in created:
+            created_ideas.append(idea_obj.model_dump())
+            print(f"[API /api/mcp/chat] Auto-saved parsed project note: '{idea_obj.title}' ({idea_obj.id})", flush=True)
         for ok, msg in action_results:
             print(f"[API /api/mcp/chat] Agent action {'OK' if ok else 'FAILED'}: {msg}", flush=True)
-
-        # Auto-detect and save project notes drafted with YAML frontmatter
-        extracted = database.extract_idea_from_text(result.get("response", ""))
-        if extracted:
-            try:
-                idea_obj = IdeaNode(**extracted)
-                database.save_or_update_idea(idea_obj)
-                created_idea = idea_obj.model_dump()
-                print(f"[API /api/mcp/chat] Auto-saved parsed project note: '{idea_obj.title}' ({idea_obj.id})", flush=True)
-            except Exception as save_err:
-                print(f"[API /api/mcp/chat] Note auto-save warning: {save_err}", flush=True)
     else:
         err = result.get("error", "Unknown error")
         print(f"[API /api/mcp/chat] Failure: {err}", flush=True)
@@ -301,7 +294,8 @@ async def _mcp_chat_impl(req: McpChatRequest):
     return {
         "success": result.get("success", False),
         "response": result.get("response", ""),
-        "created_idea": created_idea,
+        "created_idea": created_ideas[0] if created_ideas else None,
+        "created_ideas": created_ideas,
         "provider": req.provider or "agy",
         "model": result.get("model", req.model),
         "attempts": result.get("attempts", 1),

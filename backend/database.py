@@ -292,14 +292,59 @@ def parse_markdown_string(raw: str, default_id: Optional[str] = None) -> Optiona
         print(f"Error parsing markdown string: {e}")
         return None
 
+_FENCE_LINE_RE = re.compile(r"^\s*(`{3,}|~{3,})\s*([\w+-]*)\s*$")
+
+def _has_titled_frontmatter(lines: List[str], start: int) -> bool:
+    """True if lines[start] opens a YAML frontmatter block that has a title."""
+    if start >= len(lines) or lines[start].strip() != "---":
+        return False
+    for line in lines[start + 1:]:
+        if line.strip() == "---":
+            return False
+        if re.match(r"^(title|name)\s*:\s*\S", line):
+            return True
+    return False
+
+def extract_note_blocks(text: str) -> List[str]:
+    """Returns every project note (YAML frontmatter with a title + markdown body) in an assistant message.
+    Notes are normally wrapped in a ```markdown fence; code blocks nested inside a note are kept intact."""
+    lines = (text or "").split("\n")
+    notes = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE_LINE_RE.match(lines[i])
+        if m and m.group(2).lower() in ("", "markdown", "md", "yaml") and _has_titled_frontmatter(lines, i + 1):
+            fence, depth, body = m.group(1), 0, []
+            j = i + 1
+            while j < len(lines):
+                fm = _FENCE_LINE_RE.match(lines[j])
+                if fm and fm.group(1)[0] == fence[0] and len(fm.group(1)) >= len(fence):
+                    if fm.group(2):
+                        depth += 1      # a nested ```lang block opens
+                    elif depth:
+                        depth -= 1      # the nested block closes
+                    else:
+                        break           # end of the note
+                body.append(lines[j])
+                j += 1
+            notes.append("\n".join(body).strip())
+            i = j + 1
+            continue
+        i += 1
+    if not notes:
+        # Unfenced note: frontmatter followed by the rest of the message
+        for i in range(len(lines)):
+            if _has_titled_frontmatter(lines, i):
+                notes.append("\n".join(lines[i:]).strip())
+                break
+    return notes
+
 def extract_idea_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """Extracts and parses frontmatter project block from an assistant message if present."""
-    match = re.search(r"```(?:markdown|md|yaml)?\s*\n(---\s*\n\s*title:.+?\n---\s*\n.*?)\n?```", text, re.DOTALL)
-    if not match:
-        match = re.search(r"(---\s*\n\s*title:.+?\n---\s*\n.*)", text, re.DOTALL)
-    if match:
-        raw_block = match.group(1).strip()
-        return parse_markdown_string(raw_block)
+    """Extracts and parses the first frontmatter project block from an assistant message if present."""
+    for raw_block in extract_note_blocks(text):
+        parsed = parse_markdown_string(raw_block)
+        if parsed:
+            return parsed
     return None
 
 def remove_connection_from_markdown_file(source_id: str, target_id: str):
